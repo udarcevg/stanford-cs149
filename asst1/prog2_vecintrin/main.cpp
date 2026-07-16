@@ -182,44 +182,44 @@ void absSerial(float *values, float *output, int N) {
         }
     }
 }
-k
 
-// implementation of absSerial() above, but it is vectorized using CS149 intrinsics
-void absVector(float *values, float *output, int N) {
+
+void absVector(float* values, float* output, int N) {
     __cs149_vec_float x;
     __cs149_vec_float result;
     __cs149_vec_float zero = _cs149_vset_float(0.f);
+    __cs149_mask maskAll, maskIsNegative, maskIsNotNegative;
 
     //  Note: Take a careful look at this loop indexing.  This example
     //  code is not guaranteed to work when (N % VECTOR_WIDTH) != 0.
     //  Why is that the case?
-    for (int i = 0; i < N; i += VECTOR_WIDTH) {
-        int width = std::min(VECTOR_WIDTH, N - i);
+    for (int i=0; i<N; i+=VECTOR_WIDTH) {
+
         // All ones
-        __cs149_mask maskActiveChanel = _cs149_init_ones(width);
+        maskAll = _cs149_init_ones();
+
         // All zeros
-        __cs149_mask maskIsNegative = _cs149_init_ones(0);
+        maskIsNegative = _cs149_init_ones(0);
 
         // Load vector of values from contiguous memory addresses
-        _cs149_vload_float(x, values + i, maskActiveChanel); // x = values[i];
+        _cs149_vload_float(x, values+i, maskAll);               // x = values[i];
 
         // Set mask according to predicate
-        _cs149_vlt_float(maskIsNegative, x, zero, maskActiveChanel); // if (x < 0) {
+        _cs149_vlt_float(maskIsNegative, x, zero, maskAll);     // if (x < 0) {
 
         // Execute instruction using mask ("if" clause)
-        _cs149_vsub_float(result, zero, x, maskIsNegative); //   output[i] = -x;
+        _cs149_vsub_float(result, zero, x, maskIsNegative);      //   output[i] = -x;
 
-        __cs149_mask temporary_not = _cs149_mask_not(maskIsNegative);
-        __cs149_mask maskIsNotNegative = _cs149_mask_and(temporary_not, maskActiveChanel);
+        // Inverse maskIsNegative to generate "else" mask
+        maskIsNotNegative = _cs149_mask_not(maskIsNegative);     // } else {
 
         // Execute instruction ("else" clause)
-        _cs149_vload_float(result, values + i, maskIsNotNegative); //   output[i] = x; }
+        _cs149_vload_float(result, values+i, maskIsNotNegative); //   output[i] = x; }
 
         // Write results back to memory
-        _cs149_vstore_float(output + i, result, maskActiveChanel);
+        _cs149_vstore_float(output+i, result, maskAll);
     }
 }
-
 
 // accepts an array of values and an array of exponents
 //
@@ -295,13 +295,24 @@ float arraySumSerial(float *values, int N) {
 // You can assume N is a multiple of VECTOR_WIDTH
 // You can assume VECTOR_WIDTH is a power of 2
 float arraySumVector(float *values, int N) {
-    //
-    // CS149 STUDENTS TODO: Implement your vectorized version of arraySumSerial here
-    //
+    __cs149_vec_float x;
+    __cs149_vec_float sumVector = _cs149_vset_float(0.f);
 
     for (int i = 0; i < N; i += VECTOR_WIDTH) {
+        int width = std::min(VECTOR_WIDTH, N - i);
+        __cs149_mask maskActiveLine = _cs149_init_ones(width);
 
+        _cs149_vload_float(x, values + i, maskActiveLine);
+        _cs149_vadd_float(sumVector, sumVector, x, maskActiveLine);
     }
 
-    return 0.0;
+    float tmp[VECTOR_WIDTH];
+    __cs149_mask maskAll = _cs149_init_ones();
+    _cs149_vstore_float(tmp, sumVector, maskAll);
+    float sum = 0.f;
+    for (int i = 0; i < VECTOR_WIDTH; i ++) {
+        sum += tmp[i];
+    }
+
+    return sum;
 }

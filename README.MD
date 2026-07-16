@@ -18,3 +18,9 @@ I ran ./myexpr -s  10000 with vectors widths 2, 4, 8 and 16. As the vector width
 utilization decreased. This happens because wider vectors have more lanes, but some lines  become inactive due
 to masking, especially in the final partial vector iteration or in conditional code. With a large vector
 width, the same amount of leftover work can waste more SIMD lanes, reducing overall utilization.
+
+VECTOR_WIDTH | Vector utilization
+2            | 89.1%
+4            | 84.2%
+8            | 85.8%
+16           | 80.3%
