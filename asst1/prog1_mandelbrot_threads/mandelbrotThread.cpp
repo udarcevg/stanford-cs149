@@ -15,6 +15,12 @@ typedef struct {
 } WorkerArgs;
 
 
+/// Assigning an equal number of rows to each thread may be inefficient because some rows
+/// require much more computation than others. The top and bottom rows usually escape quickly,
+/// while rows near the middle of th image can take many more iterations. As a result, some threads
+/// finish early and wait while others thread are still working.
+
+
 extern void mandelbrotSerial(
     float x0, float y0, float x1, float y1,
     int width, int height,
@@ -22,25 +28,45 @@ extern void mandelbrotSerial(
     int maxIterations,
     int output[]);
 
-
-void workerThreadStart(WorkerArgs *const args) {
-
-    printf("Hello from thread %d\n", args->threadId);
-    int rowsPerThread = args->height / args->numThreads;
-    int startRow = args->threadId * rowsPerThread;
-    int numRows = rowsPerThread;
-
-    if (args->threadId == args->numThreads - 1) {
-        numRows = args->height - startRow;
-    }
-    mandelbrotSerial(
-        args->x0, args->y0, args->x1, args->y1,
-        args->width, args->height, startRow, numRows,
-        args->maxIterations, args->output
-        );
-}
-
+// Block partitioning
+// void workerThreadStart(WorkerArgs *const args) {
 //
+//     double startTime = CycleTimer::currentSeconds();
+//     int rowsPerThread = args->height / args->numThreads;
+//     int startRow = args->threadId * rowsPerThread;
+//     int numRows = rowsPerThread;
+//
+//     if (args->threadId == args->numThreads - 1) {
+//         numRows = args->height - startRow;
+//     }
+//     mandelbrotSerial(
+//         args->x0, args->y0, args->x1, args->y1,
+//         args->width, args->height, startRow, numRows,
+//         args->maxIterations, args->output
+//         );
+//     double endTime = CycleTimer::currentSeconds();
+//     printf("Thread %d: %.3f ms\n", args->threadId, 1000.0 * (endTime - startTime));
+// }
+
+// Cycling assignment
+void workerThreadStart(WorkerArgs * const args) {
+
+    double startTime = CycleTimer::currentSeconds();
+
+    for (int row = args->threadId; row < args->height; row += args->numThreads) {
+        mandelbrotSerial(
+            args->x0, args->y0, args->x1, args->y1,
+            args->width, args->height,
+            row, 1,
+            args->maxIterations,
+            args->output
+        );
+    }
+
+    double endTime = CycleTimer::currentSeconds();
+
+    printf("Thread %d: %.3f ms\n", args->threadId, 1000.0 * (endTime - startTime));
+}
 // MandelbrotThread --
 //
 // Multi-threaded implementation of mandelbrot set image generation.
@@ -74,7 +100,6 @@ void mandelbrotThread(
         args[i].maxIterations = maxIterations;
         args[i].numThreads = numThreads;
         args[i].output = output;
-
         args[i].threadId = i;
     }
 
