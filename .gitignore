@@ -16,7 +16,7 @@ myexp
 sqrt
 kmeans
 saxpy
-objs
+objs/
 
 
 # ISPC generated files
