@@ -2,7 +2,7 @@
 
 ## Notes
 
-### Assignments 1.1
+### Program 1.1
 Multithreading parallelizes work across multiple CPU cores or hardware threads, while SIMS
 parallelizes operations on multiple data elements using vector register in a single instruction.
 
@@ -10,7 +10,7 @@ parallelizes operations on multiple data elements using vector register in a sin
 * SIMD = one worker with many hands
 
 
-### Assignments 2.1
+### Program 2.1
 I ran ./myexpr -s  10000 with vectors widths 2, 4, 8 and 16. As the vector width increased, vector
 utilization decreased. This happens because wider vectors have more lanes, but some lines  become inactive due
 to masking, especially in the final partial vector iteration or in conditional code. With a large vector
@@ -22,7 +22,7 @@ VECTOR_WIDTH | Vector utilization
 8            | 85.8%
 16           | 80.3%
 
-### Assignments 3 Part 1
+### Program 3 Part 1
 
 The ideal maximum speedup is about 8x because ISPC is configured to generate
 8-wide AVX2 SIMD instructions. In this run, the serial version took 194.482ms and
@@ -44,7 +44,7 @@ Wrote image file mandelbrot-serial.ppm
 Wrote image file mandelbrot-ispc.ppm
 (3.61x speedup from ISPC)
 
-### Assignment 3 Part 2
+### Program 3 Part 2
 
 1.
 ```
@@ -66,3 +66,34 @@ scheduling and memory overhead. In contrast, launching 10,000 ISPC tasks only ad
 a task queue, and the existing worker threads execute the task efficiently. Therefore,ISPC task 
 scale much better for a large number of small task. 
 
+### Program 4
+
+1.
+```
+[sqrt serial]:          [82.150] ms
+[sqrt ispc]:            [41.383] ms
+[sqrt task ispc]:       [8.955] ms
+[sqrt neon intrinsics]: [8.386] ms
+(1.99x speedup from ISPC)
+(9.17x speedup from task ISPC)
+(9.80x speedup from Neon Intrinsics)
+(1.99x speedup from ISPC)
+(9.17x speedup from task ISPC)
+```
+
+2. To maximize ISPC speedup, I changed the input array so that every element has the same value:
+```value[i]=1.0f```. This improves SIMD speedup every SIMD lane performs the same amount of work.
+3.
+```
+for (unsigned int i = 0; i < N; i++) {
+if (i % 8 == 0)
+values[i] = 0.001f;   // slow
+else
+values[i] = 1.0f;     // fast
+}
+```
+
+To minimize the speedup of the ISPC implementation without task, I constructed an input where each group 
+of 8 values contains one expensive element and 7 cheaper.
+
+SIMD lanes: [slow, fast, fast, fast, fast, fast, fast, fast]

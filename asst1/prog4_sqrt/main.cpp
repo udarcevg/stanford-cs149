@@ -26,20 +26,28 @@ void sqrtNeon(int N, float initialGuess, float values[], float output[]) {
 
         // float32x4_t guess_0 = vdupq_n_f32(initialGuess);
         // float32x4_t guess_1 = vdupq_n_f32(initialGuess);
+        // Reciprocal square root estimate (approximately 1 / sqrt(x))
         float32x4_t guess_0 = vrsqrteq_f32(x_0);
         float32x4_t guess_1 = vrsqrteq_f32(x_1);
 
+        // Newton-Raphson iteration:
+        // guess_new = 0.5 * (3 * guess - x * guess^3)
         float32x4_t v_three = vdupq_n_f32(3.f);
         float32x4_t v_half = vdupq_n_f32(0.5f);
 
-        // 6 итераций за глаза хватает для точности float
         for (int iter = 0; iter < 4; iter++) {
+            // guess^2
             float32x4_t g2_0 = vmulq_f32(guess_0, guess_0);
+            // guess^3
             float32x4_t g3_0 = vmulq_f32(g2_0, guess_0);
+            // x * guess^3
             float32x4_t term_0 = vmulq_f32(x_0, g3_0);
+            // Compute (3 * guess - x * guess^3)
             float32x4_t sub0 = vsubq_f32(vmulq_f32(v_three, guess_0), term_0);
+            // guess_new = 0.5 * (3 * guess - x * guess * guess * guess)
             guess_0 = vmulq_f32(v_half, sub0);
 
+            // repeat for two vector
             float32x4_t g2_1 = vmulq_f32(guess_1, guess_1);
             float32x4_t g3_1 = vmulq_f32(g2_1, guess_1);
             float32x4_t term_1 = vmulq_f32(x_1, g3_1);
@@ -47,13 +55,12 @@ void sqrtNeon(int N, float initialGuess, float values[], float output[]) {
             guess_1 = vmulq_f32(v_half, sub1);
         }
 
-        // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ:
-        // Превращаем обратный корень (1/sqrt(x)) в обычный корень (sqrt(x))
-        // Умножаем финальный guess на исходный x
+        // Convert the reciprocal square root into the square root:
+        // sqrt(x) = x * (1 / sqrt(x))
         float32x4_t final_res_0 = vmulq_f32(guess_0, x_0);
         float32x4_t final_res_1 = vmulq_f32(guess_1, x_1);
 
-        // Сохраняем правильный результат
+        // Store the computed square roots
         vst1q_f32(&output[i], final_res_0);
         vst1q_f32(&output[i+4], final_res_1);
     }
@@ -70,18 +77,15 @@ int main() {
 
     for (unsigned int i=0; i<N; i++)
     {
-        // TODO: CS149 students.  Attempt to change the values in the
-        // array here to meet the instructions in the handout: we want
-        // to you generate best and worse-case speedups
-        
         // starter code populates array with random input values
         values[i] = .001f + 2.998f * static_cast<float>(rand()) / RAND_MAX;
-        // Тяжелый элемент встречается редко (всего ~3% или ~1.5% элементов)
-        // if (i % 32 == 0) {
-        //     values[i] = 2.998f;
-        // } else {
-        //     values[i] = 1.0f;
-        // }
+        // Task 2
+        // values[i] = 1.0f
+        // Task 3
+        // if (i % 8 == 0)
+        //     values[i] = 0.001f;   // slow
+        // else
+        //     values[i] = 1.0f;     // fast
     }
 
     std::sort(values, values + N);
