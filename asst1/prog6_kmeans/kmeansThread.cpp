@@ -223,6 +223,10 @@ void kMeansThread(double *data, double *clusterCentroids, int *clusterAssignment
 
   /* Main K-Means Algorithm Loop */
   int iter = 0;
+  const int numThreads = 4;
+  std::thread workers[numThreads];
+  WorkerArgs workerArgs[numThreads];
+
   while (!stoppingConditionMet(prevCost, currCost, epsilon, K)) {
     // Update cost arrays (for checking convergence criteria)
     for (int k = 0; k < K; k++) {
@@ -232,9 +236,6 @@ void kMeansThread(double *data, double *clusterCentroids, int *clusterAssignment
     // Setup args struct
     // args.start = 0;
     // args.end = K;
-    const int numThreads = 4;
-    std::thread workers[numThreads];
-    WorkerArgs workerArgs[numThreads];
 
     for (int i = 0; i < numThreads; i++) {
       workerArgs[i] = args;
