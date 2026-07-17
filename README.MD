@@ -97,3 +97,39 @@ To minimize the speedup of the ISPC implementation without task, I constructed a
 of 8 values contains one expensive element and 7 cheaper.
 
 SIMD lanes: [slow, fast, fast, fast, fast, fast, fast, fast]
+
+
+### Program 5
+
+1.
+```
+[saxpy ispc]:           [3.143] ms      [94.831] GB/s   [12.728] GFLOPS
+[saxpy task ispc]:      [2.802] ms      [106.345] GB/s  [14.273] GFLOPS
+```
+The SAXPY computations is trivial parallel and has regular memory access, but its performance
+is mainly limited by memory bandwidth rather than arithmetic throughput. Using ISPC with tasks 
+improves performance because multiple cores can process different parts of the array in parallel.
+
+2.
+The multiplier of 4 is correct because writing to the result array generates both a read and
+a write to memory. When a cache line of result is not already in the cache, the CPU first loads it into
+the cache (write-allocation). After the values are updated, the  modified cache line is eventually
+written back to memory. The total memory traffic is approximately 
+```
+    Load X + 
+    Load Y + 
+    Read result cache line (write-allocate) + 
+    Write result cache line  = 
+    4 memory transfers = 
+    4 * N * sizeof(float) bytes of memory traffic.
+```
+
+3. 
+```
+[saxpy serial]:         [3.213] ms      [92.758] GB/s   [12.450] GFLOPS
+[saxpy ispc]:           [2.780] ms      [107.193] GB/s  [14.387] GFLOPS
+[saxpy task ispc]:      [3.473] ms      [85.811] GB/s   [11.517] GFLOPS
+[saxpy neon]:           [2.796] ms      [106.594] GB/s  [14.307] GFLOPS
+                                (0.80x speedup from use of tasks)
+                                (1.15x speedup from NEON)
+```
