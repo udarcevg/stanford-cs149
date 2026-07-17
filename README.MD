@@ -133,3 +133,31 @@ written back to memory. The total memory traffic is approximately
                                 (0.80x speedup from use of tasks)
                                 (1.15x speedup from NEON)
 ```
+
+
+### Program 6
+
+1. 
+```
+./kmeans
+Reading data.dat...
+Running K-means with: M=1000000, N=100, K=3, epsilon=0.100000
+[Total Time]: 7366.597 ms
+```
+2. I added timing measurements around computeAssignments, computeCentroids, and computeCost.
+The result showed that most of the runtime was spent in computeAssignments. This is makes sense
+because computeAssignments computes the distance from every data point to every centroid, so its
+work proportional M * K * N.
+```
+computeAssignments: ~111 ms
+computeCentroids:   ~14 ms
+computeCost:        ~26 ms
+```
+3. Based on this, I parallelized computeAssignments. This was a good target because each data point
+can be assigned independently. I divided the data points among multiple threads, and each thread 
+computed the closest centroid for its own range of points. No synchronization was needed because
+each thread wrote to a different part of the cluster Assignments array.
+```angular2html
+[Total Time]: 7424.952 ms - OLD
+[Total Time]: 67.733 ms - NEW
+```
