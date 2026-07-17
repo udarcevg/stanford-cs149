@@ -16,6 +16,8 @@ myexp
 sqrt
 kmeans
 saxpy
+objs
+
 
 # ISPC generated files
 *_ispc.cpp

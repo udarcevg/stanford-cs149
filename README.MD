@@ -22,7 +22,7 @@ VECTOR_WIDTH | Vector utilization
 8            | 85.8%
 16           | 80.3%
 
-### Assignments 3.1
+### Assignments 3 Part 1
 
 The ideal maximum speedup is about 8x because ISPC is configured to generate
 8-wide AVX2 SIMD instructions. In this run, the serial version took 194.482ms and
@@ -44,8 +44,10 @@ Wrote image file mandelbrot-serial.ppm
 Wrote image file mandelbrot-ispc.ppm
 (3.61x speedup from ISPC)
 
-### Assignment 3.2
+### Assignment 3 Part 2
 
+1.
+```
 [mandelbrot serial]:            [192.674] ms
 Wrote image file mandelbrot-serial.ppm
 [mandelbrot ispc]:              [53.632] ms
@@ -54,3 +56,13 @@ Wrote image file mandelbrot-ispc.ppm
 Wrote image file mandelbrot-task-ispc.ppm
 (3.59x speedup from ISPC)
 (6.82x speedup from task ISPC)
+```
+
+2. ...
+
+3. ISPC tasks are lightweight units of work executed by a fixed pool if worker threads, 
+while C++ threads are operating system threads. Launch 10,000 OS thread create significant
+scheduling and memory overhead. In contrast, launching 10,000 ISPC tasks only add work to
+a task queue, and the existing worker threads execute the task efficiently. Therefore,ISPC task 
+scale much better for a large number of small task. 
+
