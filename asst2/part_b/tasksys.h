@@ -115,17 +115,17 @@ private:
 
     void completeLaunchLocked(TaskID launch_id);
 
-    int num_thread_;
+    int num_threads_;
     std::vector<std::thread> workers_;
-    std::mutex mutex;
+    std::mutex mutex_;
     std::condition_variable work_available_;
     std::condition_variable all_work_done_;
-    bool shutdown;
+    bool shutdown_;
     TaskID next_launch_id_;
     int total_launches_;
-    int completed_launches;
+    int completed_launches_;
     std::vector<std::unique_ptr<BulkTask> > launches_;
-    std::queue<TaskID> read_launches_;
+    std::queue<TaskID> ready_launches_;
 };
 
 #endif
