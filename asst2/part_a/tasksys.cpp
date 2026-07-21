@@ -2,6 +2,12 @@
 #include "thread"
 #include <atomic>
 #include <vector>
+#include <memory>
+#include <conditions_variable>
+#include <mutex>
+#include <queue>
+#include <thread>
+#include <vector>
 
 IRunnable::~IRunnable() {
 }
@@ -193,11 +199,9 @@ TaskSystemParallelThreadPoolSleeping(int num_threads)
     : ITaskSystem(num_threads),
       num_threads_(num_threads),
       shutdown_(false),
-      work_available_(false),
-      current_runnable_(nullptr),
-      current_num_tasks_(0),
-      next_task_(0),
-      completed_tasks_(0) {
+      next_launch_id_(0),
+      total_launches_(0),
+      completed_lauches_(0) {
     for (int i = 0; i < num_threads_; i++) {
         workers_.emplace_back([this]() {
             workerLoop();
