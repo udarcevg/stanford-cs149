@@ -3,7 +3,10 @@
 #include "thread"
 
 #include "itasksys.h"
-
+#include <condition_variable>
+#include <mutex>
+#include <thread>
+#include <vector>
 /*
  * TaskSystemSerial: This class is the student's implementation of a
  * serial task execution engine.  See definition of ITaskSystem in
@@ -105,13 +108,23 @@ public:
         int num_total_tasks,
         const std::vector<TaskID> &deps
     );
+
 private:
+    void workerLoop();
     int num_threads_;
     std::vector<std::thread> workers_;
-    std::mutex_;
-    std::conditions_variable work_available_cv_;
-    std::conditions_variable all_task_done_cv;
-    
+
+    std::mutex mutex_;
+    std::condition_variable work_available_cv_;
+    std::condition_variable all_tasks_done_cv_;
+
+    bool shutdown_;
+    bool work_available_;
+
+    IRunnable* current_runnable_;
+    int current_num_tasks_;
+    int next_task_;
+    int completed_tasks_;
 };
 
 #endif
