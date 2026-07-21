@@ -83,6 +83,7 @@ int main(int argc, char** argv)
         strictGraphDepsSmall,
         strictGraphDepsMedium,
         strictGraphDepsLarge,
+        depTest,
     };
 
     std::string test_names[n_tests] = {
@@ -115,8 +116,9 @@ int main(int argc, char** argv)
         "strict_graph_deps_small_async",
         "strict_graph_deps_med_async",
         "strict_graph_deps_large_async",
+        "dep_test",
     };
- 
+
     // Parse commandline options
     int opt;
     static struct option long_options[] = {

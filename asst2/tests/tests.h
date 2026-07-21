@@ -6,7 +6,9 @@
 #include <thread>
 #include <atomic>
 #include <set>
-
+#include <cassert>
+#include <vector>
+#include <iostream>
 #include "CycleTimer.h"
 #include "itasksys.h"
 
@@ -251,7 +253,7 @@ class MathOperationsInTightForLoopTask: public IRunnable {
         int array_size_;
         MathOperationsInTightForLoopTask(int array_size, float* output) {
             array_size_ = array_size;
-            output_ = output; 
+            output_ = output;
         }
         ~MathOperationsInTightForLoopTask() {}
 
@@ -311,7 +313,7 @@ class ReduceTask: public IRunnable {
 };
 
 /*
- * Each task computes a number of rows of the output Mandelbrot image.  
+ * Each task computes a number of rows of the output Mandelbrot image.
  * These rows either form a contiguous chunk of the image (if
  * interleave is false) or are interleaved throughout the image.
  */
@@ -329,7 +331,7 @@ class MandelbrotTask: public IRunnable {
         MandelArgs *args_;
 		int interleave_;
 
-        MandelbrotTask(MandelArgs *args, int interleave) 
+        MandelbrotTask(MandelArgs *args, int interleave)
           : args_(args), interleave_(interleave) {}
         ~MandelbrotTask() {}
 
@@ -396,7 +398,7 @@ class MandelbrotTask: public IRunnable {
                 }
             }
         }
-    
+
         void runTask(int task_id, int num_total_tasks) {
             int rowsPerTask = args_->height / num_total_tasks;
 
@@ -488,7 +490,7 @@ class StrictDependencyTask: public IRunnable {
         ~StrictDependencyTask() {}
 };
 
-/* 
+/*
  * ==================================================================
  *   Begin test definitions
  * ==================================================================
@@ -588,7 +590,7 @@ TestResults pingPongTest(ITaskSystem* t, bool equal_work, bool do_async,
                          int num_elements, int base_iters) {
 
     int num_tasks = 64;
-    int num_bulk_task_launches = 400;   
+    int num_bulk_task_launches = 400;
 
     int* input = new int[num_elements];
     int* output = new int[num_elements];
@@ -638,7 +640,7 @@ TestResults pingPongTest(ITaskSystem* t, bool equal_work, bool do_async,
     results.passed = true;
 
     // Number of ping-pongs determines which buffer to look at for the results
-    int* buffer = (num_bulk_task_launches % 2 == 1) ? output : input; 
+    int* buffer = (num_bulk_task_launches % 2 == 1) ? output : input;
 
     for (int i=0; i<num_elements; i++) {
         int value = i;
@@ -661,7 +663,7 @@ TestResults pingPongTest(ITaskSystem* t, bool equal_work, bool do_async,
     delete [] output;
     for (int i=0; i<num_bulk_task_launches; i++)
         delete runnables[i];
-    
+
     return results;
 }
 
@@ -748,7 +750,7 @@ TestResults recursiveFibonacciTestBase(ITaskSystem* t, bool do_async) {
     }
     double end_time = CycleTimer::currentSeconds();
 
-    // Validate correctness 
+    // Validate correctness
     TestResults result;
     result.passed = true;
     for (int i = 0; i < num_tasks; i++) {
@@ -1180,7 +1182,7 @@ TestResults spinBetweenRunCallsAsyncTest(ITaskSystem *t) {
 TestResults mandelbrotChunkedTestBase(ITaskSystem* t, bool do_async) {
 
     int num_tasks = 128;
-    
+
     MandelbrotTask::MandelArgs ma;
     ma.x0 = -2;
     ma.x1 = 1;
@@ -1223,7 +1225,7 @@ TestResults mandelbrotChunkedTestBase(ITaskSystem* t, bool do_async) {
             result.passed = false;
         }
     }
-    
+
     result.time = end_time - start_time;
 
     delete [] golden;
@@ -1255,7 +1257,7 @@ TestResults simpleRunDepsTest(ITaskSystem *t) {
     std::vector<TaskID> b_deps;
     std::vector<TaskID> c_deps;
 
-    
+
     double start_time = CycleTimer::currentSeconds();
     auto a_taskid = t->runAsyncWithDeps(a, 10, a_deps);
 
@@ -1319,7 +1321,7 @@ TestResults strictDiamondDepsTest(ITaskSystem *t) {
 
     t->sync();
     double end_time = CycleTimer::currentSeconds();
-    
+
     TestResults result;
     result.passed = done[3];
     result.time = end_time - start_time;
@@ -1385,7 +1387,7 @@ TestResults strictGraphDepsTestBase(ITaskSystem*t, int n, int m, unsigned int se
     }
     t->sync();
     double end_time = CycleTimer::currentSeconds();
-    
+
     TestResults result;
     result.passed = done[n-1];
     result.time = end_time - start_time;
@@ -1402,4 +1404,279 @@ TestResults strictGraphDepsMedium(ITaskSystem* t) {
 
 TestResults strictGraphDepsLarge(ITaskSystem* t) {
     return strictGraphDepsTestBase(t,1000,20000,0);
+}
+
+
+
+
+class DependencyTestTask : public IRunnable {
+public:
+    enum Stage {
+        STAGE_A,
+        STAGE_B,
+        STAGE_C,
+        STAGE_D
+    };
+
+    DependencyTestTask(
+        Stage stage,
+        std::atomic<int>* completed_a,
+        std::atomic<int>* completed_b,
+        std::atomic<int>* completed_c,
+        std::atomic<int>* completed_d,
+        std::atomic<bool>* dependency_error,
+        int num_tasks_a,
+        int num_tasks_b,
+        int num_tasks_c
+    )
+        : stage_(stage),
+          completed_a_(completed_a),
+          completed_b_(completed_b),
+          completed_c_(completed_c),
+          completed_d_(completed_d),
+          dependency_error_(dependency_error),
+          num_tasks_a_(num_tasks_a),
+          num_tasks_b_(num_tasks_b),
+          num_tasks_c_(num_tasks_c) {
+    }
+
+    void runTask(int task_id, int num_total_tasks) override {
+        switch (stage_) {
+        case STAGE_A:
+            runTaskA(task_id, num_total_tasks);
+            break;
+
+        case STAGE_B:
+            runTaskB(task_id, num_total_tasks);
+            break;
+
+        case STAGE_C:
+            runTaskC(task_id, num_total_tasks);
+            break;
+
+        case STAGE_D:
+            runTaskD(task_id, num_total_tasks);
+            break;
+        }
+    }
+
+private:
+    void doSomeWork(int task_id) {
+        volatile int result = task_id;
+
+        for (int i = 0; i < 10000; i++) {
+            result = result * 31 + i;
+        }
+
+        (void)result;
+    }
+
+    void runTaskA(int task_id, int num_total_tasks) {
+        (void)num_total_tasks;
+
+        doSomeWork(task_id);
+        completed_a_->fetch_add(1);
+    }
+
+    void runTaskB(int task_id, int num_total_tasks) {
+        (void)num_total_tasks;
+
+        /*
+         * No task from B may begin until every task from A has
+         * completed.
+         */
+        if (completed_a_->load() != num_tasks_a_) {
+            dependency_error_->store(true);
+        }
+
+        doSomeWork(task_id);
+        completed_b_->fetch_add(1);
+    }
+
+    void runTaskC(int task_id, int num_total_tasks) {
+        (void)num_total_tasks;
+
+        /*
+         * No task from C may begin until every task from A has
+         * completed.
+         */
+        if (completed_a_->load() != num_tasks_a_) {
+            dependency_error_->store(true);
+        }
+
+        doSomeWork(task_id);
+        completed_c_->fetch_add(1);
+    }
+
+    void runTaskD(int task_id, int num_total_tasks) {
+        (void)num_total_tasks;
+
+        /*
+         * No task from D may begin until every task from both B and C
+         * has completed.
+         */
+        if (completed_b_->load() != num_tasks_b_ ||
+            completed_c_->load() != num_tasks_c_) {
+            dependency_error_->store(true);
+        }
+
+        doSomeWork(task_id);
+        completed_d_->fetch_add(1);
+    }
+
+    Stage stage_;
+
+    std::atomic<int>* completed_a_;
+    std::atomic<int>* completed_b_;
+    std::atomic<int>* completed_c_;
+    std::atomic<int>* completed_d_;
+
+    std::atomic<bool>* dependency_error_;
+
+    int num_tasks_a_;
+    int num_tasks_b_;
+    int num_tasks_c_;
+};
+
+
+TestResults depTest(ITaskSystem* task_system) {
+    const int num_tasks_a = 32;
+    const int num_tasks_b = 8;
+    const int num_tasks_c = 12;
+    const int num_tasks_d = 16;
+
+    std::atomic<int> completed_a(0);
+    std::atomic<int> completed_b(0);
+    std::atomic<int> completed_c(0);
+    std::atomic<int> completed_d(0);
+
+    std::atomic<bool> dependency_error(false);
+
+    DependencyTestTask task_a(
+        DependencyTestTask::STAGE_A,
+        &completed_a,
+        &completed_b,
+        &completed_c,
+        &completed_d,
+        &dependency_error,
+        num_tasks_a,
+        num_tasks_b,
+        num_tasks_c
+    );
+
+    DependencyTestTask task_b(
+        DependencyTestTask::STAGE_B,
+        &completed_a,
+        &completed_b,
+        &completed_c,
+        &completed_d,
+        &dependency_error,
+        num_tasks_a,
+        num_tasks_b,
+        num_tasks_c
+    );
+
+    DependencyTestTask task_c(
+        DependencyTestTask::STAGE_C,
+        &completed_a,
+        &completed_b,
+        &completed_c,
+        &completed_d,
+        &dependency_error,
+        num_tasks_a,
+        num_tasks_b,
+        num_tasks_c
+    );
+
+    DependencyTestTask task_d(
+        DependencyTestTask::STAGE_D,
+        &completed_a,
+        &completed_b,
+        &completed_c,
+        &completed_d,
+        &dependency_error,
+        num_tasks_a,
+        num_tasks_b,
+        num_tasks_c
+    );
+
+    std::vector<TaskID> no_dependencies;
+
+    double start_time = CycleTimer::currentSeconds();
+
+    /*
+     *             A
+     *            / \
+     *           B   C
+     *            \ /
+     *             D
+     */
+
+    TaskID launch_a = task_system->runAsyncWithDeps(
+        &task_a,
+        num_tasks_a,
+        no_dependencies
+    );
+
+    std::vector<TaskID> depends_on_a;
+    depends_on_a.push_back(launch_a);
+
+    TaskID launch_b = task_system->runAsyncWithDeps(
+        &task_b,
+        num_tasks_b,
+        depends_on_a
+    );
+
+    TaskID launch_c = task_system->runAsyncWithDeps(
+        &task_c,
+        num_tasks_c,
+        depends_on_a
+    );
+
+    std::vector<TaskID> depends_on_b_and_c;
+    depends_on_b_and_c.push_back(launch_b);
+    depends_on_b_and_c.push_back(launch_c);
+
+    task_system->runAsyncWithDeps(
+        &task_d,
+        num_tasks_d,
+        depends_on_b_and_c
+    );
+
+    task_system->sync();
+
+    double end_time = CycleTimer::currentSeconds();
+
+    bool correct_counts =
+        completed_a.load() == num_tasks_a &&
+        completed_b.load() == num_tasks_b &&
+        completed_c.load() == num_tasks_c &&
+        completed_d.load() == num_tasks_d;
+
+    bool correct_dependencies = !dependency_error.load();
+
+    if (!correct_counts) {
+        std::cerr
+            << "Incorrect task counts:" << std::endl
+            << "A: " << completed_a.load()
+            << ", expected: " << num_tasks_a << std::endl
+            << "B: " << completed_b.load()
+            << ", expected: " << num_tasks_b << std::endl
+            << "C: " << completed_c.load()
+            << ", expected: " << num_tasks_c << std::endl
+            << "D: " << completed_d.load()
+            << ", expected: " << num_tasks_d << std::endl;
+    }
+
+    if (!correct_dependencies) {
+        std::cerr
+            << "Dependency violation detected."
+            << std::endl;
+    }
+
+    TestResults result;
+    result.passed = correct_counts && correct_dependencies;
+    result.time = end_time - start_time;
+
+    return result;
 }
