@@ -141,6 +141,40 @@ double cudaScanThrust(int* inarray, int* end, int* resultarray) {
 }
 
 
+__global__ void markRepeatsKernel(
+    const int* input,
+    int length,
+    int roundedLength,
+    int* repeatFlags
+) {
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (index >= roundedLength) {
+        return;
+    }
+
+    if (index < length - 1 && input[index] == input[index + 1]) {
+        repeatFlags[index] = 1;
+    } else {
+        // This also initializes the padding and the final logical element.
+        repeatFlags[index] = 0;
+    }
+}
+
+__global__ void scatterRepeatsKernel(
+    const int* repeatFlags,
+    const int* repeatPositions,
+    int length,
+    int* output
+) {
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (index < length - 1 && repeatFlags[index] == 1) {
+        int outputIndex = repeatPositions[index];
+        output[outputIndex] = index;
+    }
+}
+
 // find_repeats --
 //
 // Given an array of integers `device_input`, returns an array of all
@@ -148,20 +182,67 @@ double cudaScanThrust(int* inarray, int* end, int* resultarray) {
 //
 // Returns the total number of pairs found
 int find_repeats(int* device_input, int length, int* device_output) {
+    if (length <= 1) {
+        return 0;
+    }
 
-    // CS149 TODO:
-    //
-    // Implement this function. You will probably want to
-    // make use of one or more calls to exclusive_scan(), as well as
-    // additional CUDA kernel launches.
-    //    
-    // Note: As in the scan code, the calling code ensures that
-    // allocated arrays are a power of 2 in size, so you can use your
-    // exclusive_scan function with them. However, your implementation
-    // must ensure that the results of find_repeats are correct given
-    // the actual array length.
+    const int roundedLength = nextPow2(length);
+    const int blocks = (roundedLength + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
 
-    return 0; 
+    int* device_repeat_flags = nullptr;
+    int* device_repeat_position = nullptr;
+
+    cudaMalloc(
+        reinterpret_cast<void**>(&device_repeat_flags),
+        roundedLength * sizeof(int)
+    );
+
+    cudaMalloc(
+        reinterpret_cast<void**>(&device_repeat_position),
+        roundedLength * sizeof(int)
+    );
+
+    // Step 1
+    // flags[i] = 1 if input[i] == input[i + 1]
+    // flags = 0 // otherwise
+    markRepeatsKernel<<<blocks, THREADS_PER_BLOCK>>>(
+        device_input,
+        length,
+        roundedLength,
+        device_repeat_flags
+    );
+
+    // Step 2: Compute where each repeated index should be written.
+    // flags:      0, 1, 0, 1, 1, 0
+    // position    0, 0, 1, 1, 2, 3
+    exclusive_scan(
+      device_repeat_flags,
+      roundedLength,
+      device_repeat_position
+    );
+
+    // Since flags[length - 1] is always zero, the exclusive-scan
+    // value at length - 1 equals the total numbers of repeated pairs.
+    int repeatCount;
+
+    cudaMemcpy(
+        &repeatCount,
+        device_repeat_position + length - 1,
+        sizeof(int),
+        cudaMemcpyDeviceToHost
+    );
+
+    // Step 3: Compact the repeated indices into device_output.
+    scatterRepeatsKernel<<<blocks, THREADS_PER_BLOCK>>>(
+        device_repeat_flags,
+        device_repeat_position,
+        length,
+        device_output
+    );
+
+    cudaFree(device_repeat_flags);
+    cudaFree(device_repeat_position);
+    return repeatCount;
 }
 
 
