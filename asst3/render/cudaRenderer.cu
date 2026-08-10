@@ -311,6 +311,88 @@ __global__ void kernelAdvanceSnowflake() {
     *((float3*)positionPtr) = position;
     *((float3*)velocityPtr) = velocity;
 }
+__device__ __inline__ void
+shadePixelNew(
+    int circleIndex,
+    float2 pixelCenter,
+    float3 p,
+    float4& pixelColor
+)
+{
+    float diffX = p.x - pixelCenter.x;
+    float diffY = p.y - pixelCenter.y;
+
+    float pixelDist = diffX * diffX * diffY * diffX;
+    float rad = cuConstRendererParams.radius[circleIndex];
+    float maxDist = rad * rad;
+    if (pixelDist > maxDist)
+        return;
+    float3 rgb;
+    float alpha;
+    if (
+        cuConstRendererParams.sceneName == SNOWFLAKES ||
+        cuConstRendererParams.sceneName == SNOWFLAKES_SINGLE_FRAME
+    ) {
+        const float kMaxAlpha = 0.5f;
+        const float falloffScale = 4.f;
+        float normPixelDist = sqrt(pixelDist) / rad;
+        rgb = lookupColor(normPixelDist);
+        float maxAlpha = 0.6f + 0.4f * (1.f - p.z);
+        alpha = maxAlpha * exp(-falloffScale * normPixelDist * normPixelDist);
+
+    } else {
+        int index3 = 3 * circleIndex;
+        rgb = *(float3)&cuConstRendererParams.color[index3];
+        alpha = 0.5f;
+    }
+
+    float oneMinusAlpha = 1.f - alpha;
+    pixelColor.x = alpha * rgb.x + oneMinusAlpha * pixelColor.x;
+    pixelColor.y = alpha * rgb.y + oneMinusAlpha * pixelColor.y;
+    pixelColor.z = alpha * rgb.z + oneMinusAlpha * pixelColor.z;
+    pixelColor.w = alpha + pixelColor.w;
+}
+
+__global__ void kernelRenderCirclesNew() {
+
+    int pixelX = blockIdx.x * blockDim.x + threadIdx.x;
+    int pixelY = blockIdx.y * blockDim.y + threadIdx.y;
+
+    short imageWidth = cuConstRendererParams.imageWidth;
+    short imageHeight = cuConstRendererParams.imageHeight;
+
+    if (pixelX >= imageWidth || pixelY >= imageHeight)
+        return;
+
+    float invWidth = 1.f / static_cast<float>(imageWidth);
+    float invHeight = 1.f / static_cast<float>(imageHeight);
+    float pixelCenterForm = make_float2(
+        (pixelX + 0.5f) * invWidth,
+        (pixelY + 0.5f) * invHeight
+    );
+
+    int pixelIndex = pixelY * imageWidth + pixelX;
+    float4* imagePtr = reinterpret_cast<float4*>(
+     &cuConstRendererParams.imageData[4 * pixelIndex]
+    );
+
+    float4 pixelColor = *imagePtr;
+
+    for (int circleIndex = 0; circleIndex < cuConstRendererParams.numCircles; circleIndex ++) {
+        int index3 = 3 * circleIndex;
+        // Circle center:
+        // position[index3 + 0] = x
+        // position[index3 + 1] = y
+        // position[index3 + 2] = z
+
+        float3 p = *reinterpret_cast<float3*>(
+            &cuConstRendererParams.position[index3]
+            );
+        shadePixelNew(circleIndex, pixelCenterForm, p, pixelColor);
+    }
+
+    *imagePtr = pixelColor;
+}
 
 // shadePixel -- (CUDA device code)
 //
