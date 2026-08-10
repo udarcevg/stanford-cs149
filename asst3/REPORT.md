@@ -47,3 +47,33 @@ The complete CUDA operation took approximately 290 ms, which is much longer the 
 Most of this time is caused by copying the input arrays from the CPU to the GPU and copying the
 result back to the CPU. Thus, although the CUDA kernel is fast, host-device communication 
 dominates the total runtime.
+
+
+### Render 
+
+
+#### Pixel-parallel
+
+Rendering to 1024x1024 image 
+Loaded scene with 10000 circles
+Loaded scene with 10000 circles
+---------------------------------------------------------
+Initializing CUDA for CudaRenderer
+Found 1 CUDA devices
+Device 0: NVIDIA GeForce RTX 3090
+SMs:        82
+Global mem: 24575 MB
+CUDA Cap:   8.6
+---------------------------------------------------------
+
+Running benchmark, 1 frames, beginning at frame 0 ...
+Dumping frames to output_xxx.ppm
+Copying image data from device
+Wrote image file output_0000.ppm
+Copying image data from device
+***************** Correctness check passed **************************
+Clear:    1.0341 ms
+Advance:  0.0006 ms
+Render:   14.0180 ms
+Total:    15.0526 ms
+File IO:  28.6175 ms
