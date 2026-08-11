@@ -463,8 +463,51 @@ shadePixel(int circleIndex, float2 pixelCenter, float3 p, float4* imagePtr) {
     // END SHOULD-BE-ATOMIC REGION
 }
 
-__global__ void kernelRenderPixels()
+__device__ __inline__ int
+circleInBox(
+    float circleX, float circleY, float circleRadius,
+    float boxL, float boxR, float boxT, float boxB)
 {
+
+    // clamp circle center to box (finds the closest point on the box)
+    float closestX = (circleX > boxL) ? ((circleX < boxR) ? circleX : boxR) : boxL;
+    float closestY = (circleY > boxB) ? ((circleY < boxT) ? circleY : boxT) : boxB;
+
+    // is circle radius less than the distance to the closest point on
+    // the box?
+    float distX = closestX - circleX;
+    float distY = closestY - circleY;
+
+    if ( ((distX*distX) + (distY*distY)) <= (circleRadius*circleRadius) ) {
+        return 1;
+    } else {
+        return 0;
+    }
+}
+
+__device__ __inline__ int
+circleInBoxConservative(
+    float circleX, float circleY, float circleRadius,
+    float boxL, float boxR, float boxT, float boxB)
+{
+
+    // expand box by circle radius.  Test if circle center is in the
+    // expanded box.
+
+    if ( circleX >= (boxL - circleRadius) &&
+         circleX <= (boxR + circleRadius) &&
+         circleY >= (boxB - circleRadius) &&
+         circleY <= (boxT + circleRadius) ) {
+        return 1;
+         } else {
+             return 0;
+         }
+}
+
+
+
+__global__ void kernelRenderPixels() {
+
     int pixelX =
         blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -477,61 +520,190 @@ __global__ void kernelRenderPixels()
     int imageHeight =
         cuConstRendererParams.imageHeight;
 
-    // Threads outside the image do nothing.
-    if (pixelX >= imageWidth || pixelY >= imageHeight)
-    {
-        return;
-    }
+    int threadId =
+        threadIdx.y * blockDim.x + threadIdx.x;
 
-    // Convert pixel coordinates to normalized [0, 1] coordinates.
-    float invWidth = 1.f / imageWidth;
-    float invHeight = 1.f / imageHeight;
+    int threadsPerBlock =
+        blockDim.x * blockDim.y;
 
-    float2 pixelCenterNorm =
-        make_float2(
-            (pixelX + 0.5f) * invWidth,
-            (pixelY + 0.5f) * invHeight
-        );
+    // Tile boundaries in pixel coordinates
+    int tileMinX =
+        blockIdx.x * blockDim.x;
 
-    // Linear pixel index.
-    int pixelIndex =
-        pixelY * imageWidth + pixelX;
+    int tileMinY =
+        blockIdx.y * blockDim.y;
 
-    // Pointer to this pixel in global memory.
-    float4* imagePtr =
-        (float4*)(
-            &cuConstRendererParams.imageData[
+    int tileMaxX =
+        min(tileMinX + (int)blockDim.x, imageWidth);
+
+    int tileMaxY =
+        min(tileMinY + (int)blockDim.y, imageHeight);
+
+    // Convert tile boundaries to normalized coordinates
+    float boxL =
+        (float)tileMinX / imageWidth;
+
+    float boxR =
+        (float)tileMaxX / imageWidth;
+
+    float boxB =
+        (float)tileMinY / imageHeight;
+
+    float boxT =
+        (float)tileMaxY / imageHeight;
+
+    bool validPixel =
+        pixelX < imageWidth &&
+        pixelY < imageHeight;
+
+    float4 pixelColor;
+    float2 pixelCenterNorm;
+
+    if (validPixel) {
+
+        int pixelIndex =
+            pixelY * imageWidth + pixelX;
+
+        float4* imagePtr =
+            (float4*)&cuConstRendererParams.imageData[
                 4 * pixelIndex
-            ]
-        );
+            ];
 
-    // Read pixel from global memory only once.
-    float4 pixelColor = *imagePtr;
+        pixelColor = *imagePtr;
 
-    // Process circles in their required original order.
-    for (int circleIndex = 0;
-         circleIndex < cuConstRendererParams.numCircles;
-         circleIndex++)
-    {
-        int index3 = 3 * circleIndex;
-
-        // Load circle position.
-        float3 p =
-            *(float3*)(
-                &cuConstRendererParams.position[index3]
+        pixelCenterNorm =
+            make_float2(
+                (pixelX + 0.5f) / imageWidth,
+                (pixelY + 0.5f) / imageHeight
             );
-
-        // Shade our local pixelColor.
-        shadePixelNew(
-            circleIndex,
-            pixelCenterNorm,
-            p,
-            pixelColor
-        );
     }
 
-    // Write the final result back to global memory once.
-    *imagePtr = pixelColor;
+    __shared__ int flags[256];
+    __shared__ int scan[256];
+    __shared__ int relevantCirclesIndices[256];
+    __shared__ int numRelevant;
+
+
+    for (int circleBase = 0;
+         circleBase < cuConstRendererParams.numCircles;
+         circleBase += threadsPerBlock) {
+
+        int circleIndex =
+            circleBase + threadId;
+
+        int relevant = 0;
+
+        if (circleIndex <
+            cuConstRendererParams.numCircles) {
+
+            int index3 =
+                3 * circleIndex;
+
+            float circleX =
+                cuConstRendererParams.position[index3];
+
+            float circleY =
+                cuConstRendererParams.position[index3 + 1];
+
+            float radius =
+                cuConstRendererParams.radius[circleIndex];
+
+            relevant =
+                circleInBox(
+                    circleX,
+                    circleY,
+                    radius,
+                    boxL,
+                    boxR,
+                    boxT,
+                    boxB
+                );
+        }
+
+        flags[threadId] = relevant;
+        scan[threadId] = relevant;
+
+        __syncthreads();
+
+        for (int offset = 1; offset < threadsPerBlock; offset *= 2)
+        {
+            int index = (threadId + 1) * offset * 2 - 1;
+            if (index < threadsPerBlock)
+            {
+                scan[index] += scan[index - offset];
+            }
+            __syncthreads();
+        }
+
+        if (threadId == 0)
+        {
+            numRelevant = scan[threadsPerBlock - 1];
+            scan[threadsPerBlock - 1] = 0;
+        }
+        __syncthreads();
+
+        for (int offset = threadsPerBlock / 2; offset >= 1; offset /= 2)
+        {
+            int index = (threadId + 1) * offset * 2 - 1;
+            if (index < threadsPerBlock)
+            {
+                int tmp = scan[index - offset];
+                scan[index - offset] = scan[index];
+                scan[index] += tmp;
+            }
+            __syncthreads();
+        }
+
+
+        if (flags[threadId])
+        {
+            relevantCirclesIndices[scan[threadId]] = circleIndex;
+        }
+        __syncthreads();
+
+        if (validPixel) {
+
+            for (int i = 0;
+                 i < numRelevant;
+                 i++) {
+
+                int currentCircle =
+                    relevantCirclesIndices[i];
+
+                int index3 =
+                    3 * currentCircle;
+
+                float3 p =
+                    *(float3*)(
+                        &cuConstRendererParams.position[
+                            index3
+                        ]
+                    );
+
+                shadePixelNew(
+                    currentCircle,
+                    pixelCenterNorm,
+                    p,
+                    pixelColor
+                );
+            }
+        }
+
+        __syncthreads();
+    }
+
+    if (validPixel) {
+
+        int pixelIndex =
+            pixelY * imageWidth + pixelX;
+
+        float4* imagePtr =
+            (float4*)&cuConstRendererParams.imageData[
+                4 * pixelIndex
+            ];
+
+        *imagePtr = pixelColor;
+    }
 }
 
 // kernelRenderCircles -- (CUDA device code)
