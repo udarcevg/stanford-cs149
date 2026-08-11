@@ -52,8 +52,10 @@ dominates the total runtime.
 
 ### Render 
 
-A CUDA block owns a tile. Before shading pixels, the block cooperatively determines which cirecles
+1. A CUDA block owns a tile. Before shading pixels, the block cooperatively determines which cirecles
 can intersect that tile.
+2. Less total work does not necessarily mean lower runtime on a parallel machine.
+
 
 
 ```

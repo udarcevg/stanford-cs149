@@ -20,6 +20,12 @@ class CudaRenderer : public CircleRenderer {
   float* cudaDeviceRadius;
   float* cudaDeviceImageData;
 
+  int* cudaDeviceBinCounts;
+  int* cudaDeviceBinOffsets;
+  int* cudaDeviceBinCircleIndices;
+
+  void buildBins();
+
  public:
   CudaRenderer();
   virtual ~CudaRenderer();
@@ -40,6 +46,9 @@ class CudaRenderer : public CircleRenderer {
 
   void shadePixel(int circleIndex, float pixelCenterX, float pixelCenterY,
                   float px, float py, float pz, float* pixelData);
+
+
+
 };
 
 #endif

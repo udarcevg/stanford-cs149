@@ -31,6 +31,7 @@ struct GlobalConstants {
     int imageWidth;
     int imageHeight;
     float* imageData;
+
 };
 
 // Global variable that is in scope, but read-only, for all cuda
@@ -56,6 +57,9 @@ __constant__ float  cuConstColorRamp[COLOR_MAP_SIZE][3];
 #include "noiseCuda.cu_inl"
 #include "lookupColor.cu_inl"
 
+#define BIN_GRID_X 16
+#define BIN_GRID_Y 16
+#define NUM_BINS (BIN_GRID_X * BIN_GRID_Y)
 
 // kernelClearImageSnowflake -- (CUDA device code)
 //
@@ -504,8 +508,6 @@ circleInBoxConservative(
          }
 }
 
-
-
 __global__ void kernelRenderPixels() {
 
     int pixelX =
@@ -526,7 +528,6 @@ __global__ void kernelRenderPixels() {
     int threadsPerBlock =
         blockDim.x * blockDim.y;
 
-    // Tile boundaries in pixel coordinates
     int tileMinX =
         blockIdx.x * blockDim.x;
 
@@ -539,7 +540,6 @@ __global__ void kernelRenderPixels() {
     int tileMaxY =
         min(tileMinY + (int)blockDim.y, imageHeight);
 
-    // Convert tile boundaries to normalized coordinates
     float boxL =
         (float)tileMinX / imageWidth;
 
@@ -580,9 +580,8 @@ __global__ void kernelRenderPixels() {
 
     __shared__ int flags[256];
     __shared__ int scan[256];
-    __shared__ int relevantCirclesIndices[256];
+    __shared__ int relevantCircleIndices[256];
     __shared__ int numRelevant;
-
 
     for (int circleBase = 0;
          circleBase < cuConstRendererParams.numCircles;
@@ -625,40 +624,43 @@ __global__ void kernelRenderPixels() {
 
         __syncthreads();
 
-        for (int offset = 1; offset < threadsPerBlock; offset *= 2)
-        {
-            int index = (threadId + 1) * offset * 2 - 1;
-            if (index < threadsPerBlock)
-            {
-                scan[index] += scan[index - offset];
+        // Inclusive Hillis-Steele scan
+        for (int offset = 1;
+             offset < threadsPerBlock;
+             offset *= 2) {
+
+            int value = 0;
+
+            if (threadId >= offset) {
+                value =
+                    scan[threadId - offset];
             }
+
+            __syncthreads();
+
+            scan[threadId] += value;
+
             __syncthreads();
         }
 
-        if (threadId == 0)
-        {
-            numRelevant = scan[threadsPerBlock - 1];
-            scan[threadsPerBlock - 1] = 0;
+        if (threadId == threadsPerBlock - 1) {
+            numRelevant =
+                scan[threadId];
         }
+
         __syncthreads();
 
-        for (int offset = threadsPerBlock / 2; offset >= 1; offset /= 2)
-        {
-            int index = (threadId + 1) * offset * 2 - 1;
-            if (index < threadsPerBlock)
-            {
-                int tmp = scan[index - offset];
-                scan[index - offset] = scan[index];
-                scan[index] += tmp;
-            }
-            __syncthreads();
+        // Stable compaction
+        if (flags[threadId]) {
+
+            int outputIndex =
+                scan[threadId] - 1;
+
+            relevantCircleIndices[
+                outputIndex
+            ] = circleIndex;
         }
 
-
-        if (flags[threadId])
-        {
-            relevantCirclesIndices[scan[threadId]] = circleIndex;
-        }
         __syncthreads();
 
         if (validPixel) {
@@ -668,7 +670,7 @@ __global__ void kernelRenderPixels() {
                  i++) {
 
                 int currentCircle =
-                    relevantCirclesIndices[i];
+                    relevantCircleIndices[i];
 
                 int index3 =
                     3 * currentCircle;
@@ -793,6 +795,18 @@ CudaRenderer::~CudaRenderer() {
         cudaFree(cudaDeviceRadius);
         cudaFree(cudaDeviceImageData);
     }
+
+    if (cudaDeviceBinCounts) {
+        cudaFree(cudaDeviceBinCounts);
+    }
+
+    if (cudaDeviceBinOffsets) {
+        cudaFree(cudaDeviceBinOffsets);
+    }
+
+    if (cudaDeviceBinCircleIndices) {
+        cudaFree(cudaDeviceBinCircleIndices);
+    }
 }
 
 const Image*
@@ -857,6 +871,9 @@ CudaRenderer::setup() {
     cudaMemcpy(cudaDeviceVelocity, velocity, sizeof(float) * 3 * numCircles, cudaMemcpyHostToDevice);
     cudaMemcpy(cudaDeviceColor, color, sizeof(float) * 3 * numCircles, cudaMemcpyHostToDevice);
     cudaMemcpy(cudaDeviceRadius, radius, sizeof(float) * numCircles, cudaMemcpyHostToDevice);
+
+    cudaMalloc((void**)&cudaDeviceBinCounts, NUM_BINS * sizeof(int));
+    cudaMalloc((void**)&cudaDeviceBinOffsets,(NUM_BINS + 1) * sizeof(int));
 
     // Initialize parameters in constant memory.  We didn't talk about
     // constant memory in class, but the use of read-only constant
@@ -960,20 +977,16 @@ CudaRenderer::advanceAnimation() {
     cudaDeviceSynchronize();
 }
 
-void
-CudaRenderer::render() {
-    // // 256 threads per block is a healthy number
-    // dim3 blockDim(256, 1);
-    // dim3 gridDim((numCircles + blockDim.x - 1) / blockDim.x);
-    //
-    // kernelRenderCircles<<<gridDim, blockDim>>>();
-    // cudaDeviceSynchronize();
+void CudaRenderer::render() {
+
     dim3 blockDim(16, 16);
+
     dim3 gridDim(
         (image->width + blockDim.x - 1) / blockDim.x,
         (image->height + blockDim.y - 1) / blockDim.y
-        );
+    );
 
     kernelRenderPixels<<<gridDim, blockDim>>>();
+
     cudaDeviceSynchronize();
 }
