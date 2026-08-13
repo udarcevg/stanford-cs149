@@ -188,5 +188,153 @@ are generally much less energy-expensive than off-chip memory accesses. Therefor
 total energy consuption even if performance does not imporve.
 
 
+## 3
 
+### 3.A
+
+Each element processed by EXP requires 10 FLOPs.
+
+For each element, the EXP loops one float form A (4 bytes) and write one float back to A (4 bytes).
+
+Total memory traffic per element = `4 + 4 = 8 bytes`
+
+Arithmetic intensity = 10 FLOPs / 8 bytes = 1.25 FLOPs/byte.
+
+
+## 3.B
+
+For N = 1000, the matrix contains 1,000,00 elements.
+The EXP loop performs:
+``
+N * N = 1000 * 1000 = 1,000,000 elements
+ ``
+Step EXP loop
+```
+Compute time = 10 FLOPs * 1,000,000 elements / 10 MFLOPS peak = 1.0 s.
+Memory Traffic = 1,000,000 * (READ A 4 byte + WRITE A 4 bytes) = 8,000,000 bytes = 8 MB
+Memory time = 8 MB / 10 MB = 0.8 s
+```
+Therefore, the EXP loop is compute-bound and takes 1.0 s.
+
+Step row_sum
+```
+// row_sum performs 1 FLOP per element
+Compute time = 1 FLOPs * 1,000,000 elements / 10 MFLOPS peak = 0.1 s.
+Memory Traffic = 1,000,000 * READ A 4 byte = 4,000,000 bytes = 4 MB
+Memory time = 4 MB / 10 MB = 0.4 s
+```
+Therefore, row_sum is memory-bonund and takes 0.4s,
+
+Total execution time: 1.0 + 0.4 = 1.4 seconds.
+
+
+### 3.C
+
+The two loop can be fused so that row_sum consumes the buffered output of EXP directly.
+
+```c++
+auto out_sum(N);
+for (i = 0; i < N; i++) {
+    auto a_tile = LOAD_TILE(A, i, a_tile_shape);
+    auto out = EXP(a_tile);
+    auto out_tile = BUFFER(out);
+    
+    STORE_TILE(A, i, out_tile);
+    out_sum[i] = row_sum(out_tile);
+}
+
+auto out_tile = BUFFER(out_sum);
+STORE_TILE(B, out_tile);
+```
+
+In the original code, each element of A is read once for EXP, written back, and then read again for row_sum
+
+The fused version eliminates the second read  of A because row_sum uses the buffered EXP result directly.
+
+Memory traffic per element decreases form 12 bytes to 8 bytes, while the arithmetic remain 11 FLOPS per element. This
+improves arithmetic intensity by exploiting producer-consumer locality.
+
+
+### 3.D
+
+For N = 1000, the matrix contains 1,000,000 elements.
+
+The fused loop performs 10 FLOPs for EXP and 1 FLOP for row_sum:
+
+```
+Total computation = 1,000,000 * 11 = 11 MFLOPs.
+Compute time = 11 MFLOPs / 10 MFLOS peak = 1.1s
+Memory Traffic = 1,000,000 * (4 + 4) = 8 MB
+Memory Time = 8 MB / 10 MB bandwidth = 0.8s
+Execution = max(1.1, 0.8) = 1.1
+```
+
+
+### 3.E
+
+The fused code can be further optimized using metapipelining. Instead of waiting for the current tile to finish 
+before loading the next tile, we overlap loading tile i+1 with processing tile i.
+
+```
+PROLOGUE
+    load first item
+
+STEADY STATE
+    load next item
+    process current item
+    advance
+
+EPILOGUE
+    process last item
+```
+
+```c++
+// PROLOGUE
+auto current_tile = LOAD_TILE(A, 0, a_tile_shape);
+
+
+// STEADY STATE
+for (int = 0; i < N - 1; i++) {
+    auto next_tile = LOAD_TILE(A, i + 1, a_tile_shape);
+    
+    auto out = EXP(current_tile);
+    auto out_tile = BUFFER(out);
+    
+    STORE_TILE(A, i, out_tile);
+    out_sum[i] = row_sum(out_tile);
+    
+    current_tile = next_tile
+}
+// EPILOGUE
+auto out = EXP(current_tile);
+auto out_tile = BUFFER(out);
+
+STORE_TILE(A, N - 1, out_tile);
+out_sum[N - 1] = row_sum(out_tile);
+```
+
+This allows memory transfers and computation from different iterations to overlap while preserving the producer-consumer
+locality from thr fused implementation.
+
+
+
+### 3.F
+
+For N = 1000, the matrix contains 1,000,000 elements.
+
+The fused loop performs 10 FLOPs for EXP and 1 FLOP for row_sum:
+
+```
+EXP computation = 1,000,000 * 10 FLOPS = 10 MFLOPs.
+EXP time = 10 MFLOPs / 10 MFLOS peak = 1 s
+row_sum computation = 1,000,000 * 1 FLOPS = 1 MFLOPs.
+row_sum time = 1 MFLOPs / 10 MFLOS peak = 0.1 s
+Memory Traffic = 1,000,000 * (4 + 4) = 8 MB
+Memory Time = 8 MB / 10 MB bandwidth = 0.8s
+```
+
+With metapipelining, memory transfer, EXP and row_sum for different rows can overlap. Therefore, execution time is 
+determinated by the slowest pipline stage: `max(1.0, 0.1, 0.8) = 1.0 s`
+
+Therefore, the metapipelining implementation takes approximately 1.0 second.
 
