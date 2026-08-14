@@ -582,3 +582,61 @@ The other option do not remove the bandwidth bottleneck: more execution context 
 provides little benefit because the data has almost no reuse, and wider WIMD increases compute throughput without 
 increasing memory bandwidth.
 
+## PROBLEM 4
+
+### PROBLEM 4.A
+
+Each warp executes two initial loads: `2 cycles`
+
+Because every group of 8 input exponents contains at least one value 8, every 32-thread  warp contains at least one 
+thread with expValue = 8. Therefore, the warp executes all 8 loop iterations.
+
+Each iteration perform two arithmetic instructions:
+`
+result *=  baseValue;
+result *= 2.0f or result *=4.0f
+`
+
+So the loop takes: `8 * 2 = 16 cycles`
+
+Finally, storing the result requires 1 cycle.
+
+Total cycles per warp = `2 + 16 + 1 = 19 cycles`
+
+### PRACTICE PROBLEM 4.B
+
+Each thread transfers 12 bytes:
+
+`4 bytes for inputExps load + 4 bytes for inputValues load + 4 bytes for resultValues sotre`
+
+Memory traffic per warp is: `32  * 12 = 384 bytes`
+
+Compute-limit throughput:
+
+`8 core * 1GHz / 30 cycles per warp = 266.67 million warps/s.`
+
+Bandwidth-limited throughput:
+
+`32 GB/s / 384 bytes per wart = 83.3 million warps/s.`
+
+Since 83.3 < 266.67, the program is memory-bandwidth bound.
+
+Compute utilization = 83.33 / 266.67 = 31.25%
+
+Therefore, the GPU spend approximately: `100% - 31.25% = 68.75` of its time waiting on memory.
+
+### PRACTICE PROBLEM 4.C
+
+Each warp begin by issuing two loads instructions. The second load is issued one cycles after the first and becomes 
+ready 75 cycles later, so the warp cannot continue until cycle 76.
+
+While one wart waits, other warp can issue their two loads. Each warp therefore contributed 2 cycles of independent 
+work before it also waits.
+
+Number of warps required = `ceil(75/2) = 38 warps`
+
+Since each warp contains 32 CUDA threads: `38 * 32 = 1216 CUDA threads execution context`
+
+Therefore, the minimum required to completely hide the load latency is 38 warps, or 1216 CUDA thread execution context.
+
+
