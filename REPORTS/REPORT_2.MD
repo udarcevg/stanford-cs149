@@ -846,5 +846,3 @@ hidden, the cache provides no benefits because the arrays are streamed only once
 divergence because each 64-thread warp contains both positive and negative values.
 
 
-
-

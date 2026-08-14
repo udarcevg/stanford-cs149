@@ -338,3 +338,247 @@ determinated by the slowest pipline stage: `max(1.0, 0.1, 0.8) = 1.0 s`
 
 Therefore, the metapipelining implementation takes approximately 1.0 second.
 
+
+## PRACTICE PROBLEM 1
+
+### 1.A
+
+```c++
+void write_segment_sizes(
+    int* flags,
+    int* num_segs,
+    int* starts
+    ) {
+    if (flags[id] == 1) {
+        starts[scan[id]] == id;
+    }
+}
+
+void compute_size(
+    int N,
+    int num_segs,
+    int* starts,
+    int* sizes
+) {
+    if (id == num_segs - 1)
+        sizes[id] = N - starts[id];
+    else
+        sizes[id] = starts[id + 1] - start[id];
+}
+
+void segment_size(
+    int N,
+    int* flogs,
+    int* num_segs,
+    int* seg_size
+    ) {
+    int scan[N];
+    int starts[N];
+    
+    exclusive_scan(N, flags, scan);
+    *num_segs = scan[N - 1] + flags[N- 1];
+    write_segment_starts<<<N>>>(flags, scan, start);
+    compute_size<<<*num_segs>>>(N, *num_egs, starts, seg_sizes);
+    }
+```
+
+### 1.B
+
+$$\text{Work} = \frac{S}{2} + \frac{S}{4} + \frac{S}{8} + \dots + 1 = S \cdot \left(1 - \frac{1}{S}\right) = S - 1 = \mathbf{O(S)}$$
+
+```c++
+void reduce_max(int* values, int stride, int count) {
+    int i = id;
+    if (i < count) {
+        if left = i * 2 * stride;
+        int right = left + stride;
+        
+        values[left] = max(values[left], value[right]);
+    }
+}
+
+int largest_segment_size(int N, int* flags) {
+    int num_segs;
+    int seq_sizes[N];
+    
+    segment_sizes(N, flags, &num_segs, seg_sizes);
+    
+    int stride = 1;
+    int count = num_segs / 2;
+    
+    while (count > 0) {
+        reduce_max<<<count>>>(seq_sizes, stride, count);
+        stride *= 2;
+        count /= 2;
+    }
+    
+    return seq_sizes[0];
+}
+```
+
+
+## PRACTICE PROBLEM 2
+
+```c++
+void threadA() {
+    int outValue[COUNT];
+    int inValues[COUNT];
+    
+    HANDLE sendHandles[COUNT];
+    HANDLE recvHandles[COUNT];
+    
+    // Start all sends and receives
+    for (int i = 0; i < COUNT; i++) {
+        outValues[i] = randomInt();
+        sendHandles[i] = asyncSend(&outValues[i]);
+        recvHandles[i] = asyncRecv(&inValues[i])
+    }
+    
+    // Wait until all reurned message arrive.
+    for (int i = 0; i < COUNT; i++) {
+        while (!testRecvDone(recvHandles[i]))
+    }
+    
+    // Verify that every returned value was originally se
+    std::unordered_set<int> sentSet;
+    for (int i=0; i < COUNT; i++) {
+        sentSet.insert(outValues[i]);
+    }
+    
+    bool allMath = true;
+    for (int i = 0; i < COUNT; i++) {
+        if (sentSet.find(inValues[i]) == sentSet.end()) {
+            allMatch = false;
+            break;
+        }
+    }
+    if (allMatch) {
+        print("DONE\n")
+    }
+}
+
+void threadB() {
+    int values[COUNT];
+    HANDLE recvHandles[COUNT];
+    HANDLE sendHandles[COUNT];
+    bool sentBack[COUNT] = {false};
+    
+    // Start all recieves.
+    for (int i = 0; i < COUNT; i++) {
+        recvHandles[i] = asyncRecv(&values[i]);
+    }
+    
+    // As soon as a receive finishes, immerdiately sent that value back
+    int numSentBack = 0;
+    while (numSetnBack < COUNT) {
+        for (int i = 0; i < COUNT; i++) {
+            if (!sentBack[i] && testRecvDone(recvHanles[i])) {
+                sendHandles[i] = asyncSend(&values[i]);
+                sentBack[i] = true;
+                numSentBack++;
+            }
+        }
+    }
+    
+    // Ensure all return sends complete before threadB exists.
+    for (int i = 0; i < COUNT; i++) {
+        while (!testSendDone(sendHandles[i])) {
+            
+        }
+    }   
+}
+```
+
+All sense and receives are initiated asynchronously so many network operations can be outstanding at the same time. 
+Thread B send each value back as soon as its receives completes, rather than waiting for all receives.
+
+Because messages may arrive out of order, Thread A verifies the returned values without assuming that receives index 
+i corresponds to send index i. The uniqueness of values returned by randomInt() makes this verification possible.
+
+
+## PRACTICE PROBLEM 3
+
+
+### PRACTICE PROBLEM 3.A
+Each core executes one floating-point instruction per cycle across a 32-wide warp.
+
+Per-core throughput: `1  inst/cycle * 32 wide * 1GHz = 32 GFLOPS`
+With 16 core: `32 GFLOPS * 16 core = 512 GLOPS`
+
+Therefore, the peak floating-point throughput of PKPU2.0 is 512 GFLOPS, or 0.512 TFLOPS
+
+### PRACTICE PROBLEM 3.B
+
+No, the workload does not suffer from instruction stream divergence.
+
+Each warp contains 32 consecutive CUDE threads. The input is arranged in groups of 32 positive values followed by 32 
+negative values. Therefore, all threads within a warp always take the same branch.
+
+Warp containing positive values execute f1(), while warps containing negative values execute f2(). Different warps may
+take different branches without causing divergence. Divergence only occurs when threads within the same warp take 
+different branches.
+
+### PRACTICE PROBLEM 3.C
+
+For one warp, arithmetic work is:
+
+```
+1 cycle for val2
+1 cycle for comparison
+14 cycles for either f1 or f2
+```
+Since there is no divergence, only one branch path executed.
+
+Arithmetic cycles per warp = `1 + 1 + 14 = 16 cycles`
+
+Each of the 32 threads reads one float and write one float:
+
+Memory traffic per warp = `32 * (4 + 4) = 256 bytes`
+
+AI = `16/256 = 1/16 arithmetic cycles per byte`
+
+### PRACTICE PROBLEM 3.D
+
+Each core supports 256 CUDA thread contexts.
+
+Since each warp contains 32 thread: `256 / 32 = 8 resident warps per core`
+
+A load has a latency of 50 cycles. While one warp waits for its load, the processor can schedule the other 7 warps, 
+but this only provide about 7 cycles of latency hiding before returning to the stalled warp.
+
+Since 7 cycles is much less than the 50-cycle load latency, the processor cannot completely hide the memory latency.
+
+Therefore, PKPU2.0 does not have enough residen warps to hide all load latency.
+
+### PRACTICE PROBLEM 3.E
+
+Each warp requires 16 arithmetic cycles and transfer 256 bytes.
+
+The maximum compute throughput is: `16 core * 1 GHz / 16 cycles per warp = 1 billion warps/s`
+
+The maximum throughput allowed by memory bandwidth is: `128 GBs / 256 bytes per warp = 0.5 billion warps/s`
+
+Since the memory system supports fewer warps per second than the compute hardware, the program is bandwidth-bound.
+
+Process utilization = 0.5 / 1.0 = 50%.
+
+Therefore, the PKPU2.0 is bandwidth-bound with approximately 50% processor utilization.
+
+### PRACTICE PROBLEM 3.F
+
+I would choose option - b, triple the memory bandwidth.
+
+From Part E, the original processor is bandwidth-bound and achieves only 50% compute utilization. Its throughput is 
+limited to 0.5 billion warps/s by the 128 GB/s memory system.
+
+Tripling bandwidth to 384 GB/s would support up to 1.5 billion warps/s, but the compute hardware can only 1.0 billion 
+waprs/s.
+
+Therefore, the new performance becomes compute-bound at 1.0 billion warps/s.
+
+`Speedup = 1.0 / 0.5 = 2x`
+
+The other option do not remove the bandwidth bottleneck: more execution context mainly help latency hiding, the cache 
+provides little benefit because the data has almost no reuse, and wider WIMD increases compute throughput without 
+increasing memory bandwidth.
+
