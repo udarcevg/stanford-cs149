@@ -640,3 +640,106 @@ Since each warp contains 32 CUDA threads: `38 * 32 = 1216 CUDA threads execution
 Therefore, the minimum required to completely hide the load latency is 38 warps, or 1216 CUDA thread execution context.
 
 
+## PRACTICE PROBLEM 4
+
+I would fuse operations 1-3 into one pass and fuse select branch into a second pass.
+
+```c++
+float sum = 0.0f;
+
+#pragma omp parallel for reduction(+:sum)
+for (int i = 0; i < N; i++) {
+    float t1 = src1[i] + src2[i];
+    float t2 = t1 * src3[i];
+    float t3 = t2 * src1[i];
+    
+    tmp3[i] = t3;
+    sum += t2;
+}
+
+float x = sum / N
+
+// 3 read + 1 write 
+// add + mul + mul + sum-add = 4 FLOPs/el.
+
+if (x > 10.0f) {
+    #pragma opm parallel for
+    for (int i = 0; i < N; i++) {
+        float t1 = tmp3[i] * src1[i];
+        float t2 = src[1] + t1;
+        dst[i] = src1[i] + t2;
+    }
+} else {
+    #pragma omp parallel for
+    for (int i = 0; i < N; i++) {
+        float t1 = tmp3[i] + src2[i];
+        float t2 = src2[i] * t1;
+        dst[i] = src2[i] * t2;
+    }
+}
+```
+
+The first pass perform 4 FLOPs and transfers 16 bytes per element. The second pass performs 3 FLOPs and transfer 12 
+bytes per element.
+
+`AI = 7 FLOPS / 12 byte = 0.25 FLOPs/byte.`
+
+Computer A:
+* Peak compute performance: `4 core * 1 GHz * 4 wide = 16 GFLOPS`
+* Its bandwidth limit is: `192 GB/s * 0.25 = 48 GLOPS`
+
+Therefore, Computer A is compute-bound at 16 GLOPS.
+
+Computer B:
+* Peak compute performance: `4 core * 1 GHz * 8 wide = 32 GLOPS`
+* Its bandwidth limit is: `128 GB/s * 0.25 = 32 GLOPS`
+
+Therefore, Computer B can achieve 32 GLOPS.
+
+I would choose Computer B because its wider SIMD allows twice the compute throughput, while its 128 GB/s memory 
+bandwidth is sufficient for the fused program.
+
+
+## PROBLEM 5
+
+### 5.A
+
+Each red-cell update performance 4 additional and 1 multiplication, for a total of 5 FLOPs.
+
+The update read 5 float values from A and writes 1 float value back:
+
+Memory traffic is: `(5 read + 1 write) * 4 byte = 24 byte`
+
+AI is: `5 FLOPs / 24 bytes = 0.208 FLOPs/byte`
+
+### 5.B
+
+For n = 1000 and NN = 100, each tile contains: `100 * 1000 = 100,000 elements`
+The tile size is: `100,000 * 4 bytes = 0.4 MB`
+LOAD_TILE time: `0.4 MB / 4 MB/s bandwidth = 0.1 seconds`
+Only half the cells are red, so STENCIL updates 50,000 cells. Each update performs 5 FLOPS: 
+`50,000 * 5 FLOPs = 0.25 MFLOPs`
+STENCIL time: `0.25 MFLOSs / 1 MLFOPS bandwidth = 0.25 seconds`
+STORE_TILE time: `0.4 MB / 4 MB/s = 0.1 seconds`
+Time per tile is: `0.1 + 0.25 + 0.1 = 0.45 seconds`
+Therefore are 10 tiles, so: `10 * 0.45 = 4.5 seconds`
+
+### 5.C
+
+From part B, the pipline stage take:
+
+LOAD_TILE = 0.1 s
+STENCIL = 0.25 s
+STORE_TILE = 0.1 s
+
+The slowest stage is STENCIL, so once the pipline is full, its throughput is one tile every 0.25s.
+
+The first tike required all three stages: `0.1 + 0.25 + 0.1 = 0.45 s.`
+
+The remaining 9 tiles complete at the pipline throughput: `9 * 0.25 = 2.25 s.`
+
+Total time: `0.45 + 2.25 = 2.7 s.`
+
+Therefore, one iteration of the outer loop takes 2.7 seconds. The pipline throughtput is limited by the 0.25 s. STENCIL 
+stage.
+
