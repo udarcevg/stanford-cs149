@@ -743,3 +743,103 @@ Total time: `0.45 + 2.25 = 2.7 s.`
 Therefore, one iteration of the outer loop takes 2.7 seconds. The pipline throughtput is limited by the 0.25 s. STENCIL 
 stage.
 
+
+## PRACTICE PROBLEM 5
+
+### 5.A
+
+Using only C2 cores, detected_face takes 400ms.
+
+Since the total deadline is 500 ms, this leaves: `500 - 400 = 100 ms` for the 100 match_face takes 20 ms, so on one 
+core perform: `100 / 20 = 5 matches` within the remaining 100 ms.
+
+Therefore, the number of cores required is: `100 / 5 = 20 C2 cores`
+
+The core used for detected_face can also participate in the mathing phase after detect_face finishes, so no additional 
+core is required.
+
+### 5.B
+
+The team's 6x Amdahl's Law limit assumes that the 400 ms detect_fase operations cannot be accelerated.
+
+However, this assumption does not hold because the heterogeneous processor can user a C1 fixed-function core. 
+Detected_face takes 400 ms on C2 but only 100 ms on С1, giving a 4x speedup for the serial portion itself.
+
+With enough C2 cores, the 100 independent match_face operations can also execute in parallel and approach 20 total.
+
+The resulting runtime can approach `100 + 20 = 120 ms`, compared with the original 2400 ms. 
+Potential speedup = `2400 / 120 = 20x`
+
+Therefore, a 10x speedup is possible because the supposedly serial bottleneck can inself be accelerated using 
+specialized hardware.
+
+### 5.C
+
+Using one C1 core, detect_face takes 100ms. This leaves: `500 - 100 = 400 ms` for 100 match_face operations.
+
+Each C2 core can perform: `400 / 20 = 20 matches` during this time
+
+Therefore: `100 / 20 = 5 C2 cores` are required.
+
+The minimum design is: `1 C1 core + 5 C2 cores = 6`
+
+Part A required 20 C2 cores, so the heterogeneous design uses: `20 - 6 = 14 fewer resource units or 70%`
+
+### 5.D
+
+With the relaxed 1500 ms deadline, multiple video frames can ve processed together.
+
+Since frames arrive every 500 ms, up to 3 frames can be grouped within the deadline.
+
+The cache can hold 4 database image, so i would process the database in groups of 4 and reuse those cache images across
+all 3 frames before loading the next group.
+
+Conceptuality:
+
+```c++
+for each group of 4 database faces {
+    load 4 database faces into cache;
+    
+    for each of 3 video frames {
+        compare the frames detected face against all 4 cache faced;
+    }
+}
+```
+
+Without batching, 3 frames would require about 300 database-image loads. With batching, each of the 100 database 
+images can be loaded once and reused across the 3 frames.
+
+This reduces database memory traffic by about 3x, which approximately doubles or better the energy efficiency while 
+still satisfying the 1500 ms deadline;
+
+```c++
+
+void process_three_frames(
+    Image frame0,
+    Image frame1,
+    Image frame2
+) {
+    Image face0 = detect_face(frame0);
+    Image face1 = detect_face(frame1);
+    Image face2 = detect_face(frame2);
+    
+    for (int = 0; i < 100; i+= 4) {
+        Image db0 = database_face[i];
+        Image db1 = database_face[i + 1];
+        Image db2 = database_face[i + 2];
+        Image db3 = database_face[i + 3];
+        match_face(face0, db0);
+        match_face(face0, db1);
+        match_face(face0, db2);
+        match_face(face0, db3);
+        match_face(face1, db0);
+        match_face(face1, db1);
+        match_face(face1, db2);
+        match_face(face1, db3);
+        match_face(face2, db0);
+        match_face(face2, db1);
+        match_face(face2, db2);
+        match_face(face2, db3);
+    }
+}
+```
