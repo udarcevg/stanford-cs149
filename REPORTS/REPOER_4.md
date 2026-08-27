@@ -73,3 +73,53 @@ insetions produces the correct final list: `0-8-10-25-27-30-75`
 
 
 ### 4.B
+
+No. Both threads can observe the original gap between noded 25 and 30 and attempt to insert it simultaneously. They 
+then race while writing 25->next and 30->prev. For example, one interleaving can leave 25->next = 27 while 30->prev = 26,
+so forward traversal sees node 27 but backward traversal sees node 26. Thus, the doubly linked list becomes inconsistent
+ because the two insertions update the same links without synchronizations.
+
+
+### 4.C
+
+A deadlock can occur because the two threads traverse the list in opposite directions. T1 can hold the lock on node 30 
+while waiting to acquire the lock on node 30, while T2 simultaneously holds the lock on node 30 while waiting to 
+acquire the lock on node 25. Neither thread can release its current lock because hand-over-hand traversal requires 
+acquiring the next lock first. Thus, threads wait for each other indefinitely.
+
+### 4.D
+
+```c++
+lock(cur);
+
+while (true) {
+    Node *next = cur->next;
+    
+    if (trylock(next)) {
+        if (value > cur->value && value <= next->value) {
+            n->prev = cur;
+            n->next = next;
+            next->prev = n;
+            prev->next = n;
+            unlock(next);
+            unlock(cur);
+            return;
+        }
+        unlock(cur);
+        cur = next;
+    } else {
+        unlock(cur);
+        lock(cur);
+    }
+}
+```
+
+Use `trylock()` when attempting to acquire the next node during hand-over-hand traversal. If it succeeds, hold both the 
+current and next node locks, check whether they surround the insertion position, and either insert or release the 
+previous lock and continue.
+
+If `trylock()` fails, release the current lock instead of blocking while holding it. Later reacquire the current node 
+and re-read its `next` pointer before continuing, since another thread may have inserted nodes while no lock were held. 
+Because the list has no deletions, the current node itself cannot disappear, so the traversal does not need to restart 
+from the head. This breaks the circular-wait conditions that caused the deadlock while still ensuring that both 
+neighboring nodes are locked during insertions. 
