@@ -61,3 +61,15 @@ Since W-W ordering is relaxed, thread 1's write to `l` during `unlock` may becom
 In addition, because W-R ordering is relaxed, theread 2's read of `x` may be reordered before its lock-acquiring CAS 
 is globlky completed. Thus, cache coherence alone does not provide the ordering betwenn accesses to differnt memory 
 locations required for correct lock semantics. Acquire/release ordering is needed.
+
+
+## Problem 4
+
+### 4.A
+
+Yes. `insert_head(8)` insert between node 0 and 10, while `insert_tail(27)` insert between nodes 25 and 30. Therefore, 
+the two threads modify different next and pre pointers and their write do not inrefere. Any inteleaving of the two 
+insetions produces the correct final list: `0-8-10-25-27-30-75`
+
+
+### 4.B
