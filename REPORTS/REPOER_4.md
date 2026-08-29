@@ -123,3 +123,167 @@ and re-read its `next` pointer before continuing, since another thread may have 
 Because the list has no deletions, the current node itself cannot disappear, so the traversal does not need to restart 
 from the head. This breaks the circular-wait conditions that caused the deadlock while still ensuring that both 
 neighboring nodes are locked during insertions. 
+
+
+## PRACTICE PROBLEM 1
+
+| Operation    | P0 X     | P1 X     | P0 Y     | P1 Y     |
+| ------------ | -------- | -------- | -------- | -------- |
+| `P0 LOAD X`  | S [MISS] | I        | I        | I        |
+| `P0 LOAD X`  | S [HIT]  | I        | I        | I        |
+| `P1 STORE Y` | S        | I        | I        | M [MISS] |
+| `P1 STORE X` | I        | M [MISS] | I        | M        |
+| `P1 LOAD Y`  | I        | M        | I        | M [HIT]  |
+| `P1 STORE Y` | I        | M        | I        | M [HIT]  |
+| `P1 LOAD Y`  | I        | M        | I        | M [HIT]  |
+| `P0 STORE X` | M [MISS] | I        | I        | M        |
+| `P0 STORE Y` | M        | I        | M [MISS] | I        |
+
+
+## PRACTICE PROBLEM 2
+
+### 2.A
+The poor scaling is caused by false sharing.  `position` and `angriness` for multiple students occupy the same 
+64-byte cache lines. Although the threads modify different fields, writes required exclusive ownership of the entire 
+cache line, causing the lines to repeatedly move between the cores.
+
+### 2.B
+
+Change the representation from Array of Structures to a Structure of Arrays:
+
+float positions[N];
+float angriness[N];
+
+Thread 0 updates only `positions`, while thread 1 updates only `angriness`. Their writes then occur on separate cache 
+lines, eliminating the false sharing without substantially increasing memory usage. 
+
+
+## PRACTICE PROBLEM 3
+
+### 3.A
+
+With `NUM_SONGS=8`, each partial_counts row in only 8*4=32 bytes. Because partial_count is 64-byte aligned, 
+partial_counts[0] and partial_counts[1] occupy the same 64-byte cache line. The two threads therefore cause false 
+sharing as they repeatedly write different counters is the same line, causing the line to ping-pong between the cores.
+
+With NUM_SONGS=16, each row is exactly 64 bytes, so the two rows occupy different cache lines. Each thread can update 
+its own cache line without invalidating the other threads line, so Olivia's approach should provide much better, 
+near-linear scaling.
+
+### 3.B
+
+The original program does not scale well because after the barrier only thread 0 performs the reduction over all 
+NUM_SLIDES=2000  counters, while thread 1 is idle. Since N=5000, this serial reduction is a significant fraction of 
+the total work.
+
+Parallelize the reduction by splitting the output counter between the threads:
+
+```c++
+int votes[N];
+int counts[NUM_SLIDES];
+int partial_counts[2][NUM_SLIDES];
+// T0
+for (i = 0; i < N / 2; i++) {
+    if (votes[i] < NUM_SLIDES    {
+        partial_counts[0][votes[i]]++
+    })
+}
+barrier();
+for (int i = 0; i < N / 2; i++) {
+    counts[i] = partial_counts[0][i] + partial_counts[1][i];
+}
+// T1
+for (i = N / 2; i < N ; i++) {
+    if (votes[i] < NUM_SLIDES    {
+        partial_counts[0][votes[i]]++
+    })
+}
+barrier();
+for (i = N / 2; i < N ; i++) {
+    counts[i] = partial_counts[0][i] + partial_counts[1][i];
+}
+```
+
+
+## PRACTICE PROBLEM 4
+
+### 4.A
+
+With 4-bite cache lines, counter[0] and counter[1] occupy different cache lines, so there is no false sharing.
+
+For each thread, the first load causes I->S and cost 1 + 10 = 11 cycles. The following store causes S->M and also 
+costs 11 cycles. Therefore, the first iterations costs 22 cycles.
+
+The line then remains in M because the other threads accesses a different cache line. Each subsequent iteration has 
+a 1-cycle load hit and a 1-cycle store hit, for 2 cycles.
+
+`Total = 2 * NUM_ITERS + 20`
+
+Transition per thread: I->S = 1, S->M = 1
+No coherence-induced invalidations or writebacks.
+
+
+### 4.B
+
+With 8-byte cache lines, counter[0] and counter[1] occupy the same cache line, so the threads suffer from false sharing.
+
+The first iterations by a thread costs:
+I->S: PrRd + BusRd = 11 cycles
+S->: PrWr + BusRdX = 11 cycles
+Total = 22 cycles
+
+After that, the other core always owns the shared line in M. Therefore each new  iterations requires:
+I->S with remove M->S and BusWB = 21 cycles
+S->M with BusRdX = 11 cycles
+Total = 32 cycles
+
+Thus, for one thread: 22 + 32(NUM_ITERS - 1) = 32*NUM_ITERS - 10 cycles.
+
+Per thread transitions:
+I->S: NUM_ITERS
+S->M: NUM_ITERS
+M->S: NUM_ITERS - 1
+S->I: NUM_ITERS - 1
+
+## PRACTICE PROBLEM 5
+
+
+### 5.A.
+
+A single ISPC gang is mapped to SIMD execution resources on one CPU core. Therefore, all programm instances in the gang 
+access `result` through the same core's cache rather than through separate private caches on different cores. As a 
+resuls, there are no copies of `result` distributed across different cores that need to be kept coherent, so cache 
+coherance is not particulary relevant in this setup.
+
+### 5.B
+
+Each 32-byte cache line contains 8 floats. With interleaved assignment, all four cores write element of every cache 
+line, causing false sharing.
+
+For each of the 4 cache lines, the first write causes I->M and costs PrWr + BudRdX = 11 cycles. Each of the next 7 
+writes transfers ownership from a core holding M to another core, requiring BusRdX + BusWB and costing 21 cycles.
+
+Total = 4 * (11 + 7 * 21)  =632 cycles
+
+Transitions: I->M: 32, M->I: 28, I->S: 0, S->M: 0, M->S: 0
+
+
+### 5.C
+
+With blocked assignments, each program instance writes exactly one 32-byte cache line:
+``
+Core0: result[0..7]
+Core1: result[8..15]
+Core2: result[16..23]
+Core3: result[24..31]
+``
+
+The first write by each core causes I->M and cost 11 cycles. The remaining 7 writes to that line are M-state hits and 
+cost 1 cycles each.
+
+`Total = 4 core (11 first + 7 subsequent one) = 72 cycles`
+
+Transitions: I->M: 4
+
+Blocked assignments avoid the false sharing and cache line ping-pong seed in the interleaved version.
+
