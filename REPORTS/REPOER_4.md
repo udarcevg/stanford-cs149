@@ -524,4 +524,81 @@ bool tableInsert(HashTable* table, string s, string s2) {
 ```
 
 Using ine lock per bin allows operations on unrelated bins to execute concurrently, Acquiring the two required locks in 
-increasing bin-index order prevents deadlock, and the `idx1 == idx2` case acquire the bin lock only once. 
+increasing bin-index order prevents deadlock, and the `idx1 == idx2` case acquire the bin lock only once.
+
+
+## PRACTICE PROBLEM 12
+
+### 12.A
+
+t.inser(40) traverses: `35 -> 100 -> 50 -> NULL`
+
+The corresponding edge lock/unlock sequence is: `L1 U1 L3 U3 L6 U^ L8 U8`
+
+E1 leads to 35, E3 to 100, E6 to 50, and E8 is the NULL left edge where the new node 40 is inserted.
+
+
+### 12.B
+
+`t.remove_max()` traverses: `35 -> 100 -> 150 -> NULL`
+
+The lock/unlock sequence is: `L1 ->L3 -> L7 -> L11 -> U11 -> L10 -> U10 -> U7 -> U3 -> U1`
+
+E11 confirms that 150 has not right child, so 150 is the maximum. E10 is locked to obtain 150's left subtree, which 
+replaces 150 through E7. The function then deletes 150 and releases the remaining locks while unwinding the recursion.
+
+
+### 12.C
+
+Thread 1 can reach node 150, read its pointer through E7 and then release E7 before locking E10:
+
+`T1: L7, read n=150, U 7`
+
+Before T1 locks E10, Thread 2 can acquire E7 and remove the maximum node 150:
+
+```
+T2: L7, L11, U11, L10
+T2: set E7 = E10.get() = NULL
+T2 U10, delete 150, U7
+```
+
+Thread 1 still holds its stale local pointer to node 150 and may then lock the old E10 and insert 140 there. Since 150 
+has already been disconnected from the BST, the inserted 140 is also unreachable.
+
+
+### 12.D
+
+The only possible value is: `v = 150`
+
+Thread 1 acquire E1 first, and remove_max() keeps E1 locked throughout its entire traversal and removal. Therefore, 
+Thread 2 cannot begin `insert(200)`, since `insert()` must first acquire E1.
+
+Thread 1 traverses `35 -> 100 -> 150`, remove 150, sets `v = 150`, and only then releases E1. Afterward Thread 2 may 
+acquire E1 and insert 200. 
+
+Therefore, 150 is the comlete set of possible values for v.
+
+
+### 12.C
+
+```c++
+bool BST::insert_sync(Edge *e, int val) {
+    Node *n = e.get();
+    if (n == NULL) {
+        e.set(new Node(val));
+        e->unlock;
+        return true;
+    }
+    if (n->value == val) {
+        e->unlock();
+        return false;
+    }    
+    Edge *next = (val < n->value) ? &n->left : &n->right;
+    next->lock();
+    e->unlock();
+    return insert_sync(next, val);
+}
+```
+The fix uses hand-over-hand locking: the child edge is locked before the current edge is released. This removes the 
+unsafe gap in which another thread could delete the current node, while still allowing fine-grained concurrency because 
+insertion holds at most two adjacent edge locks at once.
