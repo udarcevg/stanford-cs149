@@ -287,3 +287,241 @@ Transitions: I->M: 4
 
 Blocked assignments avoid the false sharing and cache line ping-pong seed in the interleaved version.
 
+## PRACTICE PROBLEM 6
+
+### 6.A
+
+Test 3 can deadlock. `insert_head(13)` traverses from left to right, while `insert_tail(4)` traverses from right to left.
+ With hand-over-hand locking, one thread can hold the lock on node 6 while waiting for node 7, while the other holds 
+the lock in node 7 while waiting for node 6. This creates a circular
+
+### 6.B
+
+Use `trylock()` when attempting to acquire the second node lock. If the second lock cannot be acquired, do not block 
+while holding the first lock; release it so that the conflicting thread can make progress.
+
+To avoid livelock, male the behavior asymmetric. For example, give `insert_head` priority; when an `insert_tail` 
+traversal fails `trylock()`, it release its current lock and yields, allowing the `insert_head` traversal to pass. 
+It can then reacquire its position and continue, rechecking the adjacent pointer because the list may have change 
+while it held no locks.
+
+This eliminates circular wait and prevent both threads from repeatedly releasing and reacquiring their lock in 
+synchrony. Starvation is possible, which the problem permits.
+
+
+## PRACTICE PROBLEM 7
+
+`atomicMin2` has a larger performance advantage for the second initialization, `values[i] = i`.
+
+With decreasing values, most values are new minima, so both `atomicMin1` and `atomicMin2` must execute CAS operations 
+frequently.
+
+With increasing values, once a small global minimum has been established, most later values cannot improve it. 
+`atomicMin2` detects new == old and return without executing CAS, while `atomicMin1` still execute CAS even when 
+the value does not change. Since CAS is treated as a write by the MSI coherence protocol, `atomicMin1` causes 
+unnecessary exclusive ownership transfer and cache-line ping-pong. Therefore `atomicMin2` performs much better for the 
+increasing input.
+
+
+## PRACTICE PROBLEM 8
+
+### 8.A
+
+Circle: No
+
+Deadlock cannot occur because each thread holds at most one pixel lock at a time. A thread locks a pixel, updates it, 
+and releases the lock before attempting to acquire the lock for the next pixel. Threads may contend for the same pixel 
+lock and temporarily wait, but no thread waits for another lock while already holding one. Therefore, a circular wait 
+cannot form.
+
+
+### 8.B
+
+LOACK_A is likely to be faster for this workload because contention on any individual pixel lock is very low. The image 
+contains millions if pixel, only four thread are running, and line locations are random, so most lock acquisitions are 
+uncontented.
+
+In the uncontended case, LOCK_A performs a single CAS and succeed. LOCK_B first reads the lock and then performs CAS, 
+adding an extra memory operations. LOCK_B is more useful under high contention because read spinning reduces repeated 
+CAS coherence traffic, but that benefit is unlikely to matter much this workload.
+
+### 8.C
+
+Circle: Yes
+
+Deadlock is possible because a thread now holds one pixel lock while truing to acquire a second. Two threads traversing 
+neighboring pixel in opposite directions can produce: 
+
+* T0 holds A and wait for B
+* T1 holds B and wait for A
+
+Ti eliminate deadlock, impose a global ordering on pixel locks. For example, assign each pixel unique linear index and 
+always acquire the lower-index pixel lock before the higher-indexed one, regardless of traversal directions. This 
+preserves fine-grained locking while preventing circular wait.
+
+
+### 8.D
+
+```c++
+void renderLine(int xstart, int ysrtart, int xend, int yend) {
+    int xcur = xstart;
+    int ycur = ystart;
+    
+    while (xcur != xend && ycur !+ yend) {
+        int xnext, ynext;
+        nextPixel(xcur, ycur, &xnext, &ynext);
+        
+        atomic {
+            if (fabs(pixels[xcur][ycur] - pixels[xnext][ynext] < .5) {
+                pixels[xcur][ycur] -= 0.1f;
+            } else {
+                pixels[xcur][ycur] += 0.1f;
+            }
+        }
+        
+        xcur = xnext;
+        ycur = ynext;
+    }
+}
+```
+
+
+## PRACTICE PROBLEM 9
+
+### 9.A
+
+The barrier ensures that every thread has completed all of its simulations and updates to `lower_so_far` before thread 
+0 prints the result. Without the barrier, thread 0 could finish early abd print the current minimum while another 
+thread still  running and may later discover a lower value. `atomicCAS` makes individual updates atomic, but it does 
+not guarantee that alk threads have finished before result is consumed. 
+
+### 9.B
+
+The program should achieve near-perfect speedup because `simulate_random_kick()` is extremely expensive and all call 
+take about the same amount of time. Most execution time is spent doing independent computation, while the atomicCAS 
+operations on `lowest_so_far` persent only a tiny fraction of the total runtime, so cache-coherence contention should 
+have little impact.
+
+A possible optimization is for each thread to maintain a private local minimum and perform only one final atomic update
+(or a reduction) after its simulations. However, this is unlikely to improve performance substantially in this case 
+because synchronization overhead is already negligible compared with the simulation cost.
+
+### 9.C
+
+```c++
+int local_min = VERY_LARGE;
+float ball_height;
+
+for (int i = 0; i < 1000000 / num_threads(); i++) {
+    simulate_random_kick(&ball_height);
+    local_min = min(local_min, (int)ball_height);
+}
+
+atomicMin(&lowest_so_far, local_min);
+
+barrier();
+
+if (get_thread_id() == 0)
+    printf("The lowest height is %d cm\n", lowest_so_far);
+```
+
+The original implementation is unlikely to achieve near-perfect speedup because the simulation is cheap while every 
+iteration performs an atomic operation on the same shared cache line. On a high-core-count processor this creates 
+heavy coherence traffic, cache-line ping-pong, and failed CAS retries. Keeping a private minimum per thread and 
+combining the minima only at the end greatly reduces synchronization and coherence traffic.
+
+
+### 9.D
+
+The correctness problem is that `lowest_so_far` and `lowes_vid` are not updated atomically as a pair. A thread can 
+successfully update `lower_so_far`, then another thread can install an even lower value and its video, after which the 
+first thread can overwrite `lowest_vid` with the video for its larger height.
+
+For example, one thread may set the minimum to 50 and another later set it to 40, but the first thread can still 
+write the video for 50 last. The final height and video would then be inconsistent. The barrier does not fix this, 
+because it only waits for all threads to finish.
+
+
+### 9.E
+
+```c++
+for (int i = 0; i < 1000000 / num_thread(); i++) {
+    simulate_random_kick(&ball_height, &vid);
+    
+    lock(&min_lock);
+    
+    if (ball_height < lowest_so_far) {
+        lowest_so_far = ball_height;
+        lowest_vid = vid;
+    }
+    unlock(&min_lock)
+}
+```
+
+The lock protects the comparison and hte updates to both `lowest_so_far` and `lowest_vid`, ensuring that the stored 
+video always corresponds to the stored minimum. The expensive simulations remaind outside the critical section to 
+maximize concurrency.
+
+## PRACTICE PROBLEM 10
+
+Graph A: Deadlock is possible.
+T0 can hold node 0 while waiting for node 1, while T1 holds node 1 while waiting for node 0.
+
+Graph B: Deadlock is also possible.
+Again, T0 can hold node 0 and eventually wait for node 1, while T1 holds node 1 and waits for node 0.
+
+The underlying problem is inconsistent lock acquisition order. A standard fix is to acquire all required node locks in 
+a global order, such as in increasing node-ID order.
+
+
+## PRACTICE PROBLEM 11
+
+### 11.A
+
+The code can deadlock because the two threads acquire the same locks in different orders. For example, T0 can hold l1 
+and l2 while waiting for l3, while T1 holds l3 and waits for l2. Neither thread can proceed.
+
+Fix the problem by defining a global lock order, such as l1 < l2 < l3, and requiring every thread  to acquire the locks 
+in that order. Both threads should lock l1, then l2, then l3 before entering the critical section. This preserves 
+mutual exclusion while eliminating circular wait.
+
+### 11.B
+
+```c++
+struct HashTable {
+    Node* bins[NUM_BINS];
+    Lock locks[NUM_BINS];
+};
+
+bool tableInsert(HashTable* table, string s, string s2) {
+    int idx1 = hashFunction(s1);
+    int idx2 = hashFunction(s2);
+    
+    int first = min(idx1, idx2);
+    int second = max(idx1, idx2);
+    
+    lock(&table->locks[first]);
+    if (first != second) {
+        lock(&table->locks[second]);
+    }
+    
+    bool result = false;
+    
+    if (!findInList(table->bins[idx1], s1) &&
+        !findInList(table->bins[idx2], s2)
+        ) {
+        insertList(table->bins[idx1], s1);
+        insertList(table->bins[idx2], s2);
+        result = true;
+    }
+    
+    if (first != second) {
+        unlock(&table->locks[second]);
+    }
+    unlock(&table->locks[first]);
+    return result
+}
+```
+
+Using ine lock per bin allows operations on unrelated bins to execute concurrently, Acquiring the two required locks in 
+increasing bin-index order prevents deadlock, and the `idx1 == idx2` case acquire the bin lock only once. 
