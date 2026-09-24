@@ -145,7 +145,7 @@ def fused_conv2d_maxpool(X, W, bias, pool_size=1):
                         row1 = nl.copy(row1_psum, dtype=X.dtype)
                         row1_pairs = row1.reshape((TILE_C, out_pool_width, 2))
                         row1_pool = nisa.tensor_reduce(nl.max, row1_pairs, axis=2)
-                        pooled = nisa.tensor_tensor(row1_pool, row1_pool, op=nl.maximum)
+                        pooled = nisa.tensor_tensor(row0_pool, row1_pool, op=nl.maximum)
                         pooled_bias = nisa.tensor_scalar(pooled, nl.add, bias_tile)
                         nisa.dma_copy(src=pooled_bias, dst=X_out[b,co_start:co_end,py,:])
     return X_out
